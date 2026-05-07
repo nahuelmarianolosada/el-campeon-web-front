@@ -1,0 +1,125 @@
+# Deploy el-campeon-web-front to AWS EC2
+
+## Project context
+- Framework: Next.js 16.2.4 (App Router, SSR)
+- Runtime: Node.js (requires `next start`, NOT static export)
+- Key env var: `NEXT_PUBLIC_API_URL` — must point to the production backend API
+- Default port: 3000 (proxied via Nginx on port 80)
+
+## Target architecture
+EC2 instance (Ubuntu 22.04) → PM2 runs `next start` → Nginx reverse proxies :80 → :3000
+
+## What needs to be done on the EC2 instance
+
+### 1. Install Node.js via nvm
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+source ~/.bashrc
+nvm install 20
+nvm use 20
+node -v  # should print v20.x.x
+```
+
+### 2. Install PM2 globally
+```bash
+npm install -g pm2
+```
+
+### 3. Upload or clone the project
+Option A — Git (recommended):
+```bash
+git clone https://github.com/YOUR_USER/el-campeon-web-front.git
+cd el-campeon-web-front
+```
+
+Option B — rsync from local machine (run from your Mac):
+```bash
+rsync -avz --exclude node_modules --exclude .next \
+  /Users/nahuellosada/node/el-campeon-web-front/ \
+  ubuntu@<EC2_PUBLIC_IP>:~/el-campeon-web-front/
+```
+
+### 4. Set environment variables
+```bash
+cd ~/el-campeon-web-front
+cat > .env.production << 'EOF'
+NEXT_PUBLIC_API_URL=http://<BACKEND_IP_OR_DOMAIN>:8080
+EOF
+```
+Replace `<BACKEND_IP_OR_DOMAIN>` with the actual backend address.
+
+### 5. Install dependencies and build
+```bash
+npm install
+npm run build
+```
+
+### 6. Start with PM2
+```bash
+pm2 start npm --name "el-campeon-front" -- start
+pm2 save
+pm2 startup  # run the printed command to enable auto-start on reboot
+```
+
+### 7. Install and configure Nginx
+```bash
+sudo apt update && sudo apt install -y nginx
+sudo nano /etc/nginx/sites-available/el-campeon
+```
+
+Paste this config (replace `YOUR_DOMAIN_OR_IP`):
+```nginx
+server {
+    listen 80;
+    server_name YOUR_DOMAIN_OR_IP;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+```
+
+```bash
+sudo ln -s /etc/nginx/sites-available/el-campeon /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl restart nginx
+```
+
+### 8. (Optional) Add HTTPS with Let's Encrypt
+```bash
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d yourdomain.com
+```
+
+## Verification commands
+```bash
+pm2 status                    # check Next.js process is online
+curl http://localhost:3000    # test Next.js directly
+curl http://<EC2_PUBLIC_IP>   # test through Nginx
+sudo nginx -t                 # validate Nginx config
+pm2 logs el-campeon-front     # tail application logs
+```
+
+## Update / redeploy
+```bash
+cd ~/el-campeon-web-front
+git pull origin main          # or rsync again from local
+npm install
+npm run build
+pm2 restart el-campeon-front
+```
+
+## AWS Security Group — required inbound rules
+| Type  | Port | Source    |
+|-------|------|-----------|
+| SSH   | 22   | Your IP   |
+| HTTP  | 80   | 0.0.0.0/0 |
+| HTTPS | 443  | 0.0.0.0/0 |
