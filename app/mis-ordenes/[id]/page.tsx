@@ -14,6 +14,8 @@ import {
   Truck,
   Home,
   XCircle,
+  Store,
+  Banknote,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -22,7 +24,7 @@ import { Separator } from "@/components/ui/separator"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { useAuth } from "@/lib/auth-context"
-import { getOrderById, orderStatusLabels, type Order } from "@/lib/api"
+import { getOrderById, orderStatusLabels, deliveryMethodLabels, type Order } from "@/lib/api"
 
 const statusColors: Record<string, string> = {
   PENDING: "bg-yellow-100 text-yellow-800 border-yellow-200",
@@ -46,6 +48,8 @@ function OrderDetailContent() {
   const router = useRouter()
   const orderId = Number(params.id)
   const isSuccess = searchParams.get("success") === "true"
+  const isCashPayment = searchParams.get("payment") === "cash"
+  const cashTxn = searchParams.get("txn")
 
   const { user, token, isLoading: authLoading } = useAuth()
   const [order, setOrder] = useState<Order | null>(null)
@@ -142,11 +146,26 @@ function OrderDetailContent() {
             <div className="mb-6 rounded-lg bg-green-50 border border-green-200 p-4 flex items-center gap-3">
               <CheckCircle className="h-6 w-6 text-green-600" />
               <div>
-                <p className="font-semibold text-green-800">
-                  ¡Pedido realizado con éxito!
-                </p>
+                <p className="font-semibold text-green-800">¡Pedido realizado con éxito!</p>
                 <p className="text-sm text-green-700">
                   Te enviamos un email con los detalles de tu compra.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {isCashPayment && cashTxn && (
+            <div className="mb-6 rounded-lg bg-amber-50 border border-amber-200 p-4 flex items-start gap-3">
+              <Banknote className="h-6 w-6 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold text-amber-800">Pagá en efectivo con este código</p>
+                <p className="mt-1 text-sm text-amber-700">
+                  Presentá el siguiente código en cualquier sucursal de{" "}
+                  <span className="font-semibold">Pago Fácil</span> o{" "}
+                  <span className="font-semibold">Rapipago</span>:
+                </p>
+                <p className="mt-2 font-mono text-lg font-bold tracking-widest text-amber-900 bg-amber-100 rounded px-3 py-1 inline-block">
+                  {cashTxn}
                 </p>
               </div>
             </div>
@@ -233,20 +252,29 @@ function OrderDetailContent() {
 
             {/* Order Details */}
             <div className="space-y-6">
-              {/* Shipping Address */}
+              {/* Delivery info */}
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <MapPin className="h-5 w-5" />
-                    Dirección de Envío
+                    {order.delivery_method === "shipping" ? (
+                      <Truck className="h-5 w-5" />
+                    ) : (
+                      <Store className="h-5 w-5" />
+                    )}
+                    {order.delivery_method
+                      ? deliveryMethodLabels[order.delivery_method]
+                      : "Dirección de Envío"}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-foreground">{order.shipping_address.street}</p>
-                  <p className="text-muted-foreground">
+                  <p className="text-foreground flex items-center gap-1">
+                    <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    {order.shipping_address.street}
+                  </p>
+                  <p className="text-muted-foreground pl-5">
                     {order.shipping_address.city}, {order.shipping_address.postal_code}
                   </p>
-                  <p className="text-muted-foreground">{order.shipping_address.country}</p>
+                  <p className="text-muted-foreground pl-5">{order.shipping_address.country}</p>
                 </CardContent>
               </Card>
 
