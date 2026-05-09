@@ -1,6 +1,6 @@
 import Link from "next/link"
 import Image from "next/image"
-import { MapPin, Phone, Mail, Clock } from "lucide-react"
+import { MapPin, Phone, Mail, Clock, Instagram } from "lucide-react"
 
 export function Footer() {
   return (
@@ -21,6 +21,17 @@ export function Footer() {
             <p className="text-sm text-primary-foreground/80">
               Tu librería y juguetería de confianza. Ofrecemos los mejores productos para toda la familia.
             </p>
+            <div className="flex items-center gap-3">
+              <Link
+                href="https://www.instagram.com/libreriaelcampeon/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary-foreground/80 hover:text-primary-foreground transition-colors"
+                aria-label="Instagram Librería El Campeón"
+              >
+                <Instagram className="h-5 w-5" />
+              </Link>
+            </div>
           </div>
 
           {/* Quick Links */}
@@ -61,12 +72,28 @@ export function Footer() {
               <li className="flex items-start gap-2">
                 <MapPin className="h-4 w-4 mt-0.5 shrink-0" />
                 <span className="text-primary-foreground/80">
-                  Calle Principal 123, Buenos Aires, Argentina
+                  <span className="block font-medium text-primary-foreground">Librería</span>
+                  Güemes 901, San Salvador de Jujuy
+                </span>
+              </li>
+              <li className="flex items-start gap-2">
+                <MapPin className="h-4 w-4 mt-0.5 shrink-0" />
+                <span className="text-primary-foreground/80">
+                  <span className="block font-medium text-primary-foreground">Juguetería</span>
+                  Güemes 1045, San Salvador de Jujuy
                 </span>
               </li>
               <li className="flex items-center gap-2">
                 <Phone className="h-4 w-4 shrink-0" />
-                <span className="text-primary-foreground/80">+54 11 1234-5678</span>
+                <span className="text-primary-foreground/80">
+                  <span className="font-medium text-primary-foreground">Librería:</span> 388 - 4231163
+                </span>
+              </li>
+              <li className="flex items-center gap-2">
+                <Phone className="h-4 w-4 shrink-0" />
+                <span className="text-primary-foreground/80">
+                  <span className="font-medium text-primary-foreground">Juguetería:</span> 388 - 4228261
+                </span>
               </li>
               <li className="flex items-center gap-2">
                 <Mail className="h-4 w-4 shrink-0" />

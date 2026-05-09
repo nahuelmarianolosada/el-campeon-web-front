@@ -22,6 +22,9 @@ export interface ProductsResponse {
   offset: number
 }
 
+export type DeliveryMethod = "shipping" | "pickup-libreria" | "pickup-jugueteria"
+export type ApiPaymentMethod = "MP_SAVED" | "MP_INSTALLMENTS" | "MP_CARD" | "CASH"
+
 export interface Order {
   id: number
   order_number: string
@@ -32,8 +35,10 @@ export interface Order {
   tax: number
   total: number
   shipping_address: ShippingAddress
+  delivery_method: DeliveryMethod
   notes?: string
   created_at: string
+  updated_at: string
 }
 
 export interface OrderItem {
@@ -60,10 +65,13 @@ export interface Payment {
   amount: number
   currency: string
   status: string
-  payment_method: string
+  payment_method: ApiPaymentMethod
   mercadopago_preference_id?: string
+  mercadopago_data?: Record<string, unknown>
   approved_at?: string
+  rejected_reason?: string
   created_at: string
+  updated_at: string
 }
 
 // Products API
@@ -151,6 +159,7 @@ export async function deleteProduct(token: string, id: number): Promise<void> {
 export async function createOrder(
   token: string,
   shippingAddress: ShippingAddress,
+  deliveryMethod: DeliveryMethod,
   notes?: string
 ): Promise<Order> {
   const response = await fetch(`${API_URL}/api/orders`, {
@@ -159,7 +168,11 @@ export async function createOrder(
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ shipping_address: shippingAddress, notes }),
+    body: JSON.stringify({
+      shipping_address: shippingAddress,
+      delivery_method: deliveryMethod,
+      notes,
+    }),
   })
 
   if (!response.ok) {
@@ -186,19 +199,35 @@ export async function getOrderById(token: string, orderId: number): Promise<Orde
 }
 
 // Payments API
-export async function createPayment(token: string, orderId: number, amount: number): Promise<Payment> {
+export async function createPayment(
+  token: string,
+  orderId: number,
+  amount: number,
+  paymentMethod: ApiPaymentMethod
+): Promise<Payment> {
   const response = await fetch(`${API_URL}/api/payments`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ order_id: orderId, amount }),
+    body: JSON.stringify({ order_id: orderId, amount, payment_method: paymentMethod }),
   })
 
   if (!response.ok) {
     const error = await response.json()
     throw new Error(error.message || "Error al crear el pago")
+  }
+  return response.json()
+}
+
+export async function getPaymentByOrderId(token: string, orderId: number): Promise<Payment> {
+  const response = await fetch(`${API_URL}/api/payments/order/${orderId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.message || "Error al obtener el pago")
   }
   return response.json()
 }
@@ -444,4 +473,17 @@ export const paymentStatusLabels: Record<string, string> = {
   REJECTED: "Rechazado",
   CANCELLED: "Cancelado",
   REFUNDED: "Reembolsado",
+}
+
+export const deliveryMethodLabels: Record<DeliveryMethod, string> = {
+  shipping: "Envío a domicilio",
+  "pickup-libreria": "Retiro en Librería El Campeón",
+  "pickup-jugueteria": "Retiro en Juguetería El Campeón",
+}
+
+export const paymentMethodLabels: Record<ApiPaymentMethod, string> = {
+  MP_SAVED: "Tarjetas guardadas o saldo en Mercado Pago",
+  MP_INSTALLMENTS: "Hasta 12 pagos sin tarjeta",
+  MP_CARD: "Débito o Crédito",
+  CASH: "Efectivo (Pago Fácil / Rapipago)",
 }
