@@ -240,6 +240,21 @@ export async function getMyPayments(token: string, limit = 10): Promise<{ data: 
   return response.json()
 }
 
+export async function updateOrderStatus(token: string, orderId: number, status: string): Promise<void> {
+  const response = await fetch(`${API_URL}/api/orders/${orderId}/status`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ status }),
+  })
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.message || "Error al actualizar estado de la orden")
+  }
+}
+
 // Reports
 export interface OrderReport {
   id: number

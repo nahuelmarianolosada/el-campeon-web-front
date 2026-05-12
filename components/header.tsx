@@ -3,7 +3,7 @@
 import Link from "next/link"
 import Image from "next/image"
 import { useState } from "react"
-import { ShoppingCart, User, Menu, X, LogOut, Package, Search } from "lucide-react"
+import { ShoppingCart, User, Menu, X, LogOut, Package, Search, ClipboardList } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -114,6 +114,17 @@ export function Header() {
                     Mis Órdenes
                   </Link>
                 </DropdownMenuItem>
+                {user?.role === "ADMIN" && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem asChild>
+                      <Link href="/admin/ordenes" className="flex items-center gap-2">
+                        <ClipboardList className="h-4 w-4" />
+                        Gestión de Órdenes
+                      </Link>
+                    </DropdownMenuItem>
+                  </>
+                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={logout} className="flex items-center gap-2 text-destructive">
                   <LogOut className="h-4 w-4" />

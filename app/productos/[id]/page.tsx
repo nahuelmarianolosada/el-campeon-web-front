@@ -40,7 +40,7 @@ export default function ProductDetailPage() {
 
   const [variants, setVariants] = useState<ProductVariant[]>([])
   const [combinations, setCombinations] = useState<VariantCombination[]>([])
-  const [selectedVariants, setSelectedVariants] = useState<Record<string, string>>({})
+  const [combinationQuantities, setCombinationQuantities] = useState<Record<number, number>>({})
 
   const { addToCart, fetchCart } = useCart()
   const { user, token } = useAuth()
@@ -95,32 +95,36 @@ export default function ProductDetailPage() {
 
   const hasVariants = (product?.has_variants ?? false) || variants.length > 0
 
-  const activeCombination = useMemo(() => {
-    if (!hasVariants || variants.length === 0) return null
-    if (Object.keys(selectedVariants).length < variants.length) return null
-    return (
-      combinations.find(
-        (c) =>
-          c.is_active &&
-          Object.entries(selectedVariants).every(([k, v]) => c.variant_combination[k] === v)
-      ) ?? null
-    )
-  }, [hasVariants, variants, combinations, selectedVariants])
+  const selectedCombinationEntries = useMemo(
+    () => Object.entries(combinationQuantities).filter(([, qty]) => qty > 0),
+    [combinationQuantities]
+  )
+  const hasSelectedCombinations = selectedCombinationEntries.length > 0
 
-  const displayPrice = activeCombination?.final_price ?? product?.price_retail ?? 0
-  const allVariantsSelected = hasVariants
-    ? Object.keys(selectedVariants).length === variants.length
-    : true
+  const totalSelectedPrice = useMemo(
+    () =>
+      selectedCombinationEntries.reduce((sum, [comboId, qty]) => {
+        const combo = combinations.find((c) => c.id === Number(comboId))
+        return sum + (combo?.final_price ?? 0) * qty
+      }, 0),
+    [selectedCombinationEntries, combinations]
+  )
+
+  const displayPrice = product?.price_retail ?? 0
   const effectiveIsOutOfStock = hasVariants
-    ? allVariantsSelected && activeCombination !== null && activeCombination.stock <= 0
+    ? combinations.filter((c) => c.is_active).every((c) => c.stock <= 0)
     : product?.stock !== undefined && product.stock <= 0
-  const effectiveStock = hasVariants
-    ? activeCombination?.stock ?? null
-    : product?.stock ?? null
+  const effectiveStock = hasVariants ? null : product?.stock ?? null
 
-  const handleVariantChange = (key: string, value: string) => {
-    setSelectedVariants((prev) => ({ ...prev, [key]: value }))
-    setQuantity(1)
+  const handleQuantityChange = (combinationId: number, quantity: number) => {
+    setCombinationQuantities((prev) => {
+      if (quantity <= 0) {
+        const next = { ...prev }
+        delete next[combinationId]
+        return next
+      }
+      return { ...prev, [combinationId]: quantity }
+    })
   }
 
   const handleAddToCart = async () => {
@@ -133,7 +137,13 @@ export default function ProductDetailPage() {
 
     setIsAddingToCart(true)
     try {
-      await addToCart(product.id, quantity, activeCombination?.id)
+      if (hasVariants) {
+        for (const [comboId, qty] of selectedCombinationEntries) {
+          await addToCart(product.id, qty, Number(comboId))
+        }
+      } else {
+        await addToCart(product.id, quantity)
+      }
       setShowSuccess(true)
       setTimeout(() => {
         setShowSuccess(false)
@@ -303,14 +313,6 @@ export default function ProductDetailPage() {
                     )}
                   </div>
 
-                  {activeCombination && activeCombination.price_adjustment !== 0 && (
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Precio base: {formatPrice(product.price_retail)}{" "}
-                      {activeCombination.price_adjustment > 0 ? "+" : ""}
-                      {formatPrice(activeCombination.price_adjustment)}
-                    </p>
-                  )}
-
                   {effectiveStock !== null && effectiveStock > 0 && (
                     <p className="mt-2 text-sm text-muted-foreground">
                       {effectiveStock} unidades disponibles
@@ -320,15 +322,13 @@ export default function ProductDetailPage() {
               </Card>
 
               {/* Variant Selector (clients only) */}
-              {!isAdmin && hasVariants && variants.length > 0 && (
+              {!isAdmin && hasVariants && (
                 <div className="mt-6">
                   <ProductVariantSelector
-                    variants={variants}
                     combinations={combinations}
-                    selected={selectedVariants}
-                    onChange={handleVariantChange}
-                    activeCombination={activeCombination}
-                    basePrice={product.price_retail}
+                    quantities={combinationQuantities}
+                    onQuantityChange={handleQuantityChange}
+                    formatPrice={formatPrice}
                   />
                 </div>
               )}
@@ -337,43 +337,12 @@ export default function ProductDetailPage() {
               {!isAdmin && (
                 <div className="mt-6">
                   {hasVariants ? (
-                    !allVariantsSelected ? (
+                    !hasSelectedCombinations ? (
                       <Button size="lg" className="w-full" disabled>
-                        Seleccioná todas las opciones
-                      </Button>
-                    ) : activeCombination === null ? (
-                      <Button size="lg" variant="secondary" className="w-full" disabled>
-                        Combinación no disponible
-                      </Button>
-                    ) : activeCombination.stock <= 0 ? (
-                      <Button size="lg" variant="secondary" className="w-full" disabled>
-                        Sin Stock
+                        Seleccioná las combinaciones deseadas
                       </Button>
                     ) : (
                       <div className="space-y-4">
-                        <div className="flex items-center gap-4">
-                          <span className="text-sm font-medium text-foreground">Cantidad:</span>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              onClick={decrementQuantity}
-                              disabled={quantity <= 1}
-                            >
-                              <Minus className="h-4 w-4" />
-                            </Button>
-                            <span className="w-12 text-center font-medium">{quantity}</span>
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              onClick={incrementQuantity}
-                              disabled={activeCombination.stock < quantity + 1}
-                            >
-                              <Plus className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-
                         <Button
                           size="lg"
                           className={cn(
@@ -396,13 +365,15 @@ export default function ProductDetailPage() {
                           ) : (
                             <>
                               <ShoppingCart className="h-5 w-5" />
-                              Agregar al Carrito
+                              {selectedCombinationEntries.length > 1
+                                ? `Agregar ${selectedCombinationEntries.length} combinaciones al carrito`
+                                : "Agregar al Carrito"}
                             </>
                           )}
                         </Button>
 
                         <p className="text-center text-sm text-muted-foreground">
-                          Total: {formatPrice(displayPrice * quantity)}
+                          Total: {formatPrice(totalSelectedPrice)}
                         </p>
                       </div>
                     )

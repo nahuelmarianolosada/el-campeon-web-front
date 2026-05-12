@@ -16,6 +16,8 @@ import {
   XCircle,
   Store,
   Banknote,
+  CreditCard,
+  AlertCircle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -24,9 +26,18 @@ import { Separator } from "@/components/ui/separator"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { useAuth } from "@/lib/auth-context"
-import { getOrderById, orderStatusLabels, deliveryMethodLabels, type Order } from "@/lib/api"
+import {
+  getOrderById,
+  getPaymentByOrderId,
+  orderStatusLabels,
+  paymentStatusLabels,
+  paymentMethodLabels,
+  deliveryMethodLabels,
+  type Order,
+  type Payment,
+} from "@/lib/api"
 
-const statusColors: Record<string, string> = {
+const orderStatusColors: Record<string, string> = {
   PENDING: "bg-yellow-100 text-yellow-800 border-yellow-200",
   CONFIRMED: "bg-blue-100 text-blue-800 border-blue-200",
   SHIPPED: "bg-purple-100 text-purple-800 border-purple-200",
@@ -34,7 +45,7 @@ const statusColors: Record<string, string> = {
   CANCELLED: "bg-red-100 text-red-800 border-red-200",
 }
 
-const statusIcons: Record<string, React.ReactNode> = {
+const orderStatusIcons: Record<string, React.ReactNode> = {
   PENDING: <Clock className="h-5 w-5" />,
   CONFIRMED: <CheckCircle className="h-5 w-5" />,
   SHIPPED: <Truck className="h-5 w-5" />,
@@ -42,17 +53,24 @@ const statusIcons: Record<string, React.ReactNode> = {
   CANCELLED: <XCircle className="h-5 w-5" />,
 }
 
+const paymentStatusColors: Record<string, string> = {
+  PENDING: "bg-yellow-100 text-yellow-800 border-yellow-200",
+  APPROVED: "bg-green-100 text-green-800 border-green-200",
+  REJECTED: "bg-red-100 text-red-800 border-red-200",
+  CANCELLED: "bg-gray-100 text-gray-800 border-gray-200",
+  REFUNDED: "bg-purple-100 text-purple-800 border-purple-200",
+}
+
 function OrderDetailContent() {
   const params = useParams()
   const searchParams = useSearchParams()
   const router = useRouter()
   const orderId = Number(params.id)
-  const isSuccess = searchParams.get("success") === "true"
-  const isCashPayment = searchParams.get("payment") === "cash"
-  const cashTxn = searchParams.get("txn")
+  const isNew = searchParams.get("success") === "true"
 
   const { user, token, isLoading: authLoading } = useAuth()
   const [order, setOrder] = useState<Order | null>(null)
+  const [payment, setPayment] = useState<Payment | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState("")
 
@@ -63,40 +81,35 @@ function OrderDetailContent() {
   }, [user, authLoading, router])
 
   useEffect(() => {
-    async function loadOrder() {
+    async function load() {
       if (!token || !orderId) return
-
       try {
-        const data = await getOrderById(token, orderId)
-        setOrder(data)
-      } catch (err) {
+        const [orderData, paymentData] = await Promise.all([
+          getOrderById(token, orderId),
+          getPaymentByOrderId(token, orderId).catch(() => null),
+        ])
+        setOrder(orderData)
+        setPayment(paymentData)
+      } catch {
         setError("No se pudo cargar la orden")
       } finally {
         setIsLoading(false)
       }
     }
-
-    if (token) {
-      loadOrder()
-    }
+    if (token) load()
   }, [token, orderId])
 
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat("es-AR", {
-      style: "currency",
-      currency: "ARS",
-    }).format(price)
-  }
+  const formatPrice = (price: number) =>
+    new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(price)
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString("es-AR", {
+  const formatDate = (dateString: string) =>
+    new Date(dateString).toLocaleDateString("es-AR", {
       year: "numeric",
       month: "long",
       day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
     })
-  }
 
   if (authLoading || isLoading) {
     return (
@@ -128,6 +141,13 @@ function OrderDetailContent() {
     )
   }
 
+  const isCashPending = payment?.payment_method === "CASH" && payment?.status === "PENDING"
+  const isMpPending =
+    payment?.payment_method !== "CASH" &&
+    payment?.status === "PENDING"
+  const isApproved = payment?.status === "APPROVED"
+  const isRejected = payment?.status === "REJECTED"
+
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
@@ -142,19 +162,20 @@ function OrderDetailContent() {
             Volver a mis órdenes
           </Link>
 
-          {isSuccess && (
+          {/* Payment-status-aware banners */}
+          {isApproved && (
             <div className="mb-6 rounded-lg bg-green-50 border border-green-200 p-4 flex items-center gap-3">
-              <CheckCircle className="h-6 w-6 text-green-600" />
+              <CheckCircle className="h-6 w-6 text-green-600 shrink-0" />
               <div>
                 <p className="font-semibold text-green-800">¡Pedido realizado con éxito!</p>
                 <p className="text-sm text-green-700">
-                  Te enviamos un email con los detalles de tu compra.
+                  El pago fue aprobado. Te enviamos un email con los detalles de tu compra.
                 </p>
               </div>
             </div>
           )}
 
-          {isCashPayment && cashTxn && (
+          {isCashPending && payment && (
             <div className="mb-6 rounded-lg bg-amber-50 border border-amber-200 p-4 flex items-start gap-3">
               <Banknote className="h-6 w-6 text-amber-600 shrink-0 mt-0.5" />
               <div>
@@ -165,7 +186,31 @@ function OrderDetailContent() {
                   <span className="font-semibold">Rapipago</span>:
                 </p>
                 <p className="mt-2 font-mono text-lg font-bold tracking-widest text-amber-900 bg-amber-100 rounded px-3 py-1 inline-block">
-                  {cashTxn}
+                  {payment.transaction_id}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {isMpPending && isNew && (
+            <div className="mb-6 rounded-lg bg-blue-50 border border-blue-200 p-4 flex items-center gap-3">
+              <Clock className="h-6 w-6 text-blue-600 shrink-0" />
+              <div>
+                <p className="font-semibold text-blue-800">Tu pedido fue recibido</p>
+                <p className="text-sm text-blue-700">
+                  Completá el pago en Mercado Pago para confirmar tu compra. El pedido se procesará una vez aprobado el pago.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {isRejected && (
+            <div className="mb-6 rounded-lg bg-red-50 border border-red-200 p-4 flex items-center gap-3">
+              <AlertCircle className="h-6 w-6 text-red-600 shrink-0" />
+              <div>
+                <p className="font-semibold text-red-800">El pago fue rechazado</p>
+                <p className="text-sm text-red-700">
+                  {payment?.rejected_reason || "Por favor contactanos o intentá con otro método de pago."}
                 </p>
               </div>
             </div>
@@ -173,18 +218,14 @@ function OrderDetailContent() {
 
           <div className="flex flex-col gap-2 mb-8 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-foreground">
-                {order.order_number}
-              </h1>
-              <p className="text-muted-foreground">
-                {formatDate(order.created_at)}
-              </p>
+              <h1 className="text-2xl font-bold text-foreground">{order.order_number}</h1>
+              <p className="text-muted-foreground">{formatDate(order.created_at)}</p>
             </div>
             <Badge
               variant="outline"
-              className={`${statusColors[order.status] || ""} flex items-center gap-2 px-3 py-1.5`}
+              className={`${orderStatusColors[order.status] || ""} flex items-center gap-2 px-3 py-1.5`}
             >
-              {statusIcons[order.status]}
+              {orderStatusIcons[order.status]}
               {orderStatusLabels[order.status] || order.status}
             </Badge>
           </div>
@@ -215,16 +256,12 @@ function OrderDetailContent() {
                           )}
                         </div>
                         <div className="flex-1">
-                          <p className="font-medium text-foreground">
-                            {item.product.name}
-                          </p>
+                          <p className="font-medium text-foreground">{item.product.name}</p>
                           <p className="text-sm text-muted-foreground">
                             {item.quantity} x {formatPrice(item.price)}
                           </p>
                         </div>
-                        <p className="font-medium text-foreground">
-                          {formatPrice(item.subtotal)}
-                        </p>
+                        <p className="font-medium text-foreground">{formatPrice(item.subtotal)}</p>
                       </div>
                     ))}
                   </div>
@@ -250,8 +287,55 @@ function OrderDetailContent() {
               </Card>
             </div>
 
-            {/* Order Details */}
+            {/* Sidebar */}
             <div className="space-y-6">
+              {/* Payment info */}
+              {payment && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <CreditCard className="h-5 w-5" />
+                      Pago
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">Estado</span>
+                      <Badge
+                        variant="outline"
+                        className={paymentStatusColors[payment.status] || ""}
+                      >
+                        {paymentStatusLabels[payment.status] || payment.status}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">Método</span>
+                      <span className="text-sm font-medium text-right max-w-[60%]">
+                        {paymentMethodLabels[payment.payment_method] || payment.payment_method}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">Monto</span>
+                      <span className="text-sm font-semibold text-primary">
+                        {formatPrice(payment.amount)}
+                      </span>
+                    </div>
+                    {payment.approved_at && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Aprobado</span>
+                        <span className="text-sm">{formatDate(payment.approved_at)}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">ID transacción</span>
+                      <span className="text-xs font-mono text-muted-foreground">
+                        {payment.transaction_id}
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               {/* Delivery info */}
               <Card>
                 <CardHeader>
@@ -290,7 +374,6 @@ function OrderDetailContent() {
                 </Card>
               )}
 
-              {/* Actions */}
               <div className="flex flex-col gap-3">
                 <Button variant="outline" asChild>
                   <Link href="/productos">Seguir comprando</Link>
