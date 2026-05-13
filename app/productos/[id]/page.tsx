@@ -139,10 +139,11 @@ export default function ProductDetailPage() {
     try {
       if (hasVariants) {
         for (const [comboId, qty] of selectedCombinationEntries) {
-          await addToCart(product.id, qty, Number(comboId))
+          const combo = combinations.find((c) => c.id === Number(comboId))
+          if (combo) await addToCart(combo.sku, qty)
         }
       } else {
-        await addToCart(product.id, quantity)
+        await addToCart(product.sku, quantity)
       }
       setShowSuccess(true)
       setTimeout(() => {

@@ -36,7 +36,7 @@ interface CartContextType {
   cart: Cart | null
   isLoading: boolean
   fetchCart: () => Promise<void>
-  addToCart: (productId: number, quantity: number, variantCombinationId?: number) => Promise<void>
+  addToCart: (sku: string, quantity: number) => Promise<void>
   updateQuantity: (itemId: number, quantity: number) => Promise<void>
   removeFromCart: (itemId: number) => Promise<void>
   clearCart: () => Promise<void>
@@ -85,12 +85,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
     }
   }, [token])
 
-  const addToCart = async (productId: number, quantity: number, variantCombinationId?: number) => {
+  const addToCart = async (sku: string, quantity: number) => {
     if (!token) throw new Error("Debes iniciar sesión para agregar al carrito")
     if (!checkAuth()) throw new Error("Tu sesión ha expirado")
-
-    const body: Record<string, unknown> = { product_id: productId, quantity }
-    if (variantCombinationId !== undefined) body.variant_combination_id = variantCombinationId
 
     const response = await fetch(`${API_URL}/api/cart/items`, {
       method: "POST",
@@ -98,7 +95,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ sku, quantity }),
     })
 
     if (!response.ok) {
