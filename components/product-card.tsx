@@ -45,7 +45,7 @@ export function ProductCard({ product, onEdit, onDelete }: ProductCardProps) {
 
     setIsAdding(true)
     try {
-      await addToCart(product.id, quantity)
+      await addToCart(product.sku, quantity)
       setShowSuccess(true)
       setQuantity(1) // Reset quantity after adding
     } catch (error) {
