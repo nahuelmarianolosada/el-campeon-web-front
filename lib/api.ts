@@ -1,5 +1,11 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"
 
+export interface ProductImage {
+  id: number
+  image_url: string
+  display_order: number
+}
+
 export interface Product {
   id: number
   sku: string
@@ -11,6 +17,7 @@ export interface Product {
   stock?: number
   min_bulk_quantity?: number
   image_url?: string | null
+  images?: ProductImage[]
   is_active?: boolean
   created_at?: string
   has_variants?: boolean
@@ -103,7 +110,7 @@ export interface CreateProductData {
   price_wholesale?: number
   stock?: number
   min_bulk_quantity?: number
-  image_url?: string
+  image_urls?: Array<{ image_url: string; display_order: number }>
   is_active?: boolean
 }
 
@@ -286,7 +293,7 @@ export async function getOrdersReport(token: string): Promise<OrderReport[]> {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!response.ok) throw new Error("Error al obtener reporte de órdenes")
-  return response.json()
+  return response.json().then((data) => data ?? [])
 }
 
 export async function getLowStockReport(token: string, limit = 100): Promise<LowStockItem[]> {
@@ -294,7 +301,7 @@ export async function getLowStockReport(token: string, limit = 100): Promise<Low
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!response.ok) throw new Error("Error al obtener reporte de stock")
-  return response.json()
+  return response.json().then((data) => data ?? [])
 }
 
 export async function getRevenueReport(token: string): Promise<RevenueReport[]> {
@@ -302,7 +309,7 @@ export async function getRevenueReport(token: string): Promise<RevenueReport[]> 
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!response.ok) throw new Error("Error al obtener reporte de ingresos")
-  return response.json()
+  return response.json().then((data) => data ?? [])
 }
 
 export interface ProductVariant {

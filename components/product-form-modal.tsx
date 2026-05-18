@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Loader2 } from "lucide-react"
+import { Loader2, Plus, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -38,7 +38,7 @@ export function ProductFormModal({ open, onOpenChange, product, onSuccess }: Pro
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState("")
 
-  const [formData, setFormData] = useState<CreateProductData>({
+  const [formData, setFormData] = useState<Omit<CreateProductData, "image_urls">>({
     sku: "",
     name: "",
     description: "",
@@ -47,9 +47,9 @@ export function ProductFormModal({ open, onOpenChange, product, onSuccess }: Pro
     price_wholesale: undefined,
     stock: undefined,
     min_bulk_quantity: undefined,
-    image_url: "",
     is_active: true,
   })
+  const [imageUrls, setImageUrls] = useState<string[]>([])
 
   useEffect(() => {
     if (product) {
@@ -62,9 +62,15 @@ export function ProductFormModal({ open, onOpenChange, product, onSuccess }: Pro
         price_wholesale: product.price_wholesale,
         stock: product.stock,
         min_bulk_quantity: product.min_bulk_quantity,
-        image_url: product.image_url || "",
         is_active: product.is_active ?? true,
       })
+      const existing =
+        product.images && product.images.length > 0
+          ? [...product.images].sort((a, b) => a.display_order - b.display_order).map((img) => img.image_url)
+          : product.image_url
+            ? [product.image_url]
+            : []
+      setImageUrls(existing)
     } else {
       setFormData({
         sku: "",
@@ -75,12 +81,24 @@ export function ProductFormModal({ open, onOpenChange, product, onSuccess }: Pro
         price_wholesale: undefined,
         stock: undefined,
         min_bulk_quantity: undefined,
-        image_url: "",
         is_active: true,
       })
+      setImageUrls([])
     }
     setError("")
   }, [product, open])
+
+  const updateImageUrl = (index: number, value: string) => {
+    setImageUrls((prev) => {
+      const next = [...prev]
+      next[index] = value
+      return next
+    })
+  }
+
+  const addImageUrl = () => setImageUrls((prev) => [...prev, ""])
+
+  const removeImageUrl = (index: number) => setImageUrls((prev) => prev.filter((_, i) => i !== index))
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -90,12 +108,15 @@ export function ProductFormModal({ open, onOpenChange, product, onSuccess }: Pro
     setError("")
 
     try {
-      const dataToSend = {
+      const dataToSend: CreateProductData = {
         ...formData,
         price_wholesale: formData.price_wholesale || undefined,
         stock: formData.stock ?? undefined,
         min_bulk_quantity: formData.min_bulk_quantity || undefined,
-        image_url: formData.image_url || undefined,
+        image_urls: imageUrls
+          .map((url) => url.trim())
+          .filter(Boolean)
+          .map((url, i) => ({ image_url: url, display_order: i })),
       }
 
       if (product) {
@@ -230,14 +251,44 @@ export function ProductFormModal({ open, onOpenChange, product, onSuccess }: Pro
             </Field>
 
             <Field className="sm:col-span-2">
-              <FieldLabel htmlFor="image_url">URL de Imagen</FieldLabel>
-              <Input
-                id="image_url"
-                type="url"
-                value={formData.image_url || ""}
-                onChange={(e) => setFormData({ ...formData, image_url: e.target.value })}
-                placeholder="https://ejemplo.com/imagen.jpg"
-              />
+              <FieldLabel>Imágenes del Producto</FieldLabel>
+              <div className="flex flex-col gap-2">
+                {imageUrls.map((url, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <Input
+                      type="url"
+                      value={url}
+                      onChange={(e) => updateImageUrl(index, e.target.value)}
+                      placeholder="https://ejemplo.com/imagen.jpg"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="shrink-0"
+                      onClick={() => removeImageUrl(index)}
+                      aria-label="Quitar imagen"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-fit gap-2"
+                  onClick={addImageUrl}
+                >
+                  <Plus className="h-4 w-4" />
+                  Agregar imagen
+                </Button>
+                {imageUrls.length === 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    Sin imágenes. La primera imagen se usa como miniatura.
+                  </p>
+                )}
+              </div>
             </Field>
           </FieldGroup>
 

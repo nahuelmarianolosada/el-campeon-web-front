@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import Image from "next/image"
-import { useRouter } from "next/navigation"
 import {
   ArrowLeft,
   ShoppingCart,
@@ -14,31 +13,49 @@ import {
   Loader2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { useCart } from "@/lib/cart-context"
-import { useAuth } from "@/lib/auth-context"
+import { getVariantCombinations, type VariantCombination } from "@/lib/api"
 
 export default function CartPage() {
-  const router = useRouter()
-  const { user, token, isLoading: authLoading } = useAuth()
   const { cart, isLoading, fetchCart, updateQuantity, removeFromCart, clearCart } = useCart()
   const [updatingItems, setUpdatingItems] = useState<Set<number>>(new Set())
   const [isClearing, setIsClearing] = useState(false)
+  const [variantData, setVariantData] = useState<Record<number, VariantCombination[]>>({})
 
   useEffect(() => {
-    if (!authLoading && !user) {
-      router.push("/login")
-    }
-  }, [user, authLoading, router])
+    fetchCart()
+  }, [fetchCart])
 
   useEffect(() => {
-    if (token) {
-      fetchCart()
-    }
-  }, [token, fetchCart])
+    if (!cart?.items?.length) return
+
+    const productIds = [
+      ...new Set(
+        cart.items
+          .filter((item) => item.product.has_variants)
+          .map((item) => item.product_id)
+      ),
+    ]
+
+    if (!productIds.length) return
+
+    Promise.all(
+      productIds.map((productId) =>
+        getVariantCombinations(productId, 100)
+          .then((res) => ({ productId, combinations: res.data }))
+          .catch(() => ({ productId, combinations: [] as VariantCombination[] }))
+      )
+    ).then((results) => {
+      setVariantData(
+        Object.fromEntries(results.map(({ productId, combinations }) => [productId, combinations]))
+      )
+    })
+  }, [cart])
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat("es-AR", {
@@ -84,18 +101,6 @@ export default function CartPage() {
     }
   }
 
-  if (authLoading || (!user && !authLoading)) {
-    return (
-      <div className="flex min-h-screen flex-col">
-        <Header />
-        <main className="flex-1 flex items-center justify-center">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </main>
-        <Footer />
-      </div>
-    )
-  }
-
   const hasItems = cart && cart.items && cart.items.length > 0
 
   return (
@@ -135,15 +140,21 @@ export default function CartPage() {
             <div className="grid gap-8 lg:grid-cols-3">
               {/* Cart Items */}
               <div className="lg:col-span-2 space-y-4">
-                {cart.items.map((item) => (
+                {cart.items.map((item) => {
+                  const variantCombo = variantData[item.product_id]?.find(
+                    (c) => c.sku === item.product.sku
+                  )
+                  const displayImage = variantCombo?.image_url || item.product.image_url
+
+                  return (
                   <Card key={item.id} className="overflow-hidden">
                     <CardContent className="p-4">
                       <div className="flex gap-4">
                         {/* Product Image */}
                         <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-lg bg-muted">
-                          {item.product.image_url ? (
+                          {displayImage ? (
                             <Image
-                              src={item.product.image_url}
+                              src={displayImage}
                               alt={item.product.name}
                               fill
                               className="object-cover"
@@ -164,6 +175,15 @@ export default function CartPage() {
                             >
                               {item.product.name}
                             </Link>
+                            {variantCombo && (
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {Object.entries(variantCombo.variant_combination).map(([key, value]) => (
+                                  <Badge key={key} variant="secondary" className="text-xs font-normal">
+                                    {key}: {value}
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
                             <p className="text-sm text-muted-foreground mt-1">
                               {formatPrice(item.price)} c/u
                             </p>
@@ -219,7 +239,8 @@ export default function CartPage() {
                       </div>
                     </CardContent>
                   </Card>
-                ))}
+                  )
+                })}
 
                 <div className="flex justify-end">
                   <Button

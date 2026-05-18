@@ -41,9 +41,9 @@ export default function HomePage() {
   const [featuredProducts, setFeaturedProducts] = useState<Product[]>([])
   const [productsLoading, setProductsLoading] = useState(false)
 
-  const [orders, setOrders] = useState<OrderReport[]>([])
-  const [lowStock, setLowStock] = useState<LowStockItem[]>([])
-  const [revenue, setRevenue] = useState<RevenueReport[]>([])
+  const [orders, setOrders] = useState<OrderReport[] | null>(null)
+  const [lowStock, setLowStock] = useState<LowStockItem[] | null>(null)
+  const [revenue, setRevenue] = useState<RevenueReport[] | null>(null)
   const [reportsLoading, setReportsLoading] = useState(false)
 
   const isAdmin = user?.role === "ADMIN"
@@ -77,8 +77,6 @@ export default function HomePage() {
     if (token) fetchCart()
   }, [token, fetchCart])
 
-  const totalRevenue = revenue.reduce((sum, r) => sum + r.ingresos, 0)
-  const totalOrders = revenue.reduce((sum, r) => sum + r.cantidad_ordenes, 0)
 
   if (authLoading) {
     return (
@@ -116,7 +114,7 @@ export default function HomePage() {
                       </div>
                       <div>
                         <p className="text-sm text-muted-foreground">Ingresos Totales</p>
-                        <p className="text-2xl font-bold text-foreground">{formatPrice(totalRevenue)}</p>
+                        <p className="text-2xl font-bold text-foreground">{formatPrice(revenue?.reduce((sum, r) => sum + r.ingresos, 0) ?? 0)}</p>
                       </div>
                     </CardContent>
                   </Card>
@@ -127,7 +125,7 @@ export default function HomePage() {
                       </div>
                       <div>
                         <p className="text-sm text-muted-foreground">Órdenes Totales</p>
-                        <p className="text-2xl font-bold text-foreground">{totalOrders}</p>
+                        <p className="text-2xl font-bold text-foreground">{revenue?.reduce((sum, r) => sum + r.cantidad_ordenes, 0) ?? 0}</p>
                       </div>
                     </CardContent>
                   </Card>
@@ -138,7 +136,7 @@ export default function HomePage() {
                       </div>
                       <div>
                         <p className="text-sm text-muted-foreground">Productos Bajo Stock</p>
-                        <p className="text-2xl font-bold text-foreground">{lowStock.length}</p>
+                        <p className="text-2xl font-bold text-foreground">{lowStock?.length ?? 0}</p>
                       </div>
                     </CardContent>
                   </Card>
@@ -164,7 +162,7 @@ export default function HomePage() {
                             </tr>
                           </thead>
                           <tbody>
-                            {[...revenue]
+                            {revenue?.slice()
                               .sort((a, b) => b.fecha.localeCompare(a.fecha))
                               .map((row, i) => (
                                 <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/40">
@@ -199,7 +197,7 @@ export default function HomePage() {
                             </tr>
                           </thead>
                           <tbody>
-                            {[...lowStock]
+                            {lowStock?.slice()
                               .sort((a, b) => a.stock - b.stock)
                               .map((item) => (
                                 <tr key={item.id} className="border-b border-border last:border-0 hover:bg-muted/40">
@@ -253,7 +251,7 @@ export default function HomePage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {[...orders]
+                          {orders?.slice()
                             .sort((a, b) => b.created_at.localeCompare(a.created_at))
                             .map((order) => (
                               <tr key={order.id} className="border-b border-border last:border-0 hover:bg-muted/40">
