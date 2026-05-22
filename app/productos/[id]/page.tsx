@@ -36,7 +36,7 @@ export default function ProductDetailPage() {
   const [error, setError] = useState("")
 
   const [combinations, setCombinations] = useState<VariantCombination[]>([])
-  const [comboIndex, setComboIndex] = useState(0)
+  const [comboIndex, setComboIndex] = useState<number | null>(null)
   const [variantQuantity, setVariantQuantity] = useState(1)
   const [detailImageIndex, setDetailImageIndex] = useState(0)
 
@@ -89,13 +89,13 @@ export default function ProductDetailPage() {
     new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(price)
 
   const hasVariants = (product?.has_variants ?? false) || combinations.length > 0
-  const currentCombo = combinations[comboIndex] ?? null
+  const currentCombo = comboIndex !== null ? (combinations[comboIndex] ?? null) : null
 
   const sortedProductImages = useMemo(
     () => [...(product?.images ?? [])].sort((a, b) => a.display_order - b.display_order),
     [product?.images]
   )
-  const showProductImageNav = sortedProductImages.length > 1 && !currentCombo?.image_url
+  const showProductImageNav = sortedProductImages.length > 1 && comboIndex === null
 
   // Variant combo image takes priority; otherwise navigate the product images array
   const displayImage = currentCombo?.image_url
@@ -351,32 +351,48 @@ export default function ProductDetailPage() {
                       size="icon"
                       variant="ghost"
                       className="shrink-0"
-                      onClick={() => setComboIndex((i) => Math.max(0, i - 1))}
-                      disabled={comboIndex === 0}
+                      onClick={() => {
+                        if (comboIndex === null || comboIndex === 0) setComboIndex(null)
+                        else setComboIndex(comboIndex - 1)
+                      }}
+                      disabled={comboIndex === null}
                     >
                       <ChevronLeft className="h-5 w-5" />
                     </Button>
 
                     {/* Combo details */}
                     <div className="flex-1 min-w-0 space-y-2 text-center">
-                      {/* Variant attribute badges */}
-                      <div className="flex flex-wrap justify-center gap-1.5">
-                        {currentCombo && Object.entries(currentCombo.variant_combination).map(([k, v]) => (
-                          <Badge key={k} variant="secondary" className="text-sm">
-                            <span className="text-muted-foreground">{k}:&nbsp;</span>{v}
-                          </Badge>
-                        ))}
-                      </div>
+                      {comboIndex === null ? (
+                        <p className="text-sm text-muted-foreground italic">Seleccioná una variante</p>
+                      ) : (
+                        <>
+                          {/* Variant attribute badges + deselect */}
+                          <div className="flex flex-wrap justify-center gap-1.5 items-center">
+                            {currentCombo && Object.entries(currentCombo.variant_combination).map(([k, v]) => (
+                              <Badge key={k} variant="secondary" className="text-sm">
+                                <span className="text-muted-foreground">{k}:&nbsp;</span>{String(v)}
+                              </Badge>
+                            ))}
+                            <button
+                              onClick={() => setComboIndex(null)}
+                              className="text-xs text-muted-foreground hover:text-foreground transition-colors ml-1"
+                              aria-label="Deseleccionar variante"
+                            >
+                              ✕
+                            </button>
+                          </div>
 
-                      {/* Stock */}
-                      {currentCombo && (
-                        currentCombo.stock > 0 ? (
-                          <p className="text-sm text-muted-foreground">
-                            {currentCombo.stock} disponibles
-                          </p>
-                        ) : (
-                          <p className="text-sm text-destructive font-medium">Sin stock</p>
-                        )
+                          {/* Stock */}
+                          {currentCombo && (
+                            currentCombo.stock > 0 ? (
+                              <p className="text-sm text-muted-foreground">
+                                {currentCombo.stock} disponibles
+                              </p>
+                            ) : (
+                              <p className="text-sm text-destructive font-medium">Sin stock</p>
+                            )
+                          )}
+                        </>
                       )}
                     </div>
 
@@ -385,7 +401,10 @@ export default function ProductDetailPage() {
                       size="icon"
                       variant="ghost"
                       className="shrink-0"
-                      onClick={() => setComboIndex((i) => Math.min(combinations.length - 1, i + 1))}
+                      onClick={() => {
+                        if (comboIndex === null) setComboIndex(0)
+                        else setComboIndex(Math.min(combinations.length - 1, comboIndex + 1))
+                      }}
                       disabled={comboIndex === combinations.length - 1}
                     >
                       <ChevronRight className="h-5 w-5" />
@@ -398,7 +417,7 @@ export default function ProductDetailPage() {
                       {combinations.map((_, i) => (
                         <button
                           key={i}
-                          onClick={() => setComboIndex(i)}
+                          onClick={() => setComboIndex(i === comboIndex ? null : i)}
                           className={cn(
                             "h-2 rounded-full transition-all duration-200",
                             i === comboIndex ? "w-5 bg-primary" : "w-2 bg-muted-foreground/30"
@@ -408,8 +427,66 @@ export default function ProductDetailPage() {
                     </div>
                   )}
 
-                  {/* Quantity + add to cart for current variant */}
-                  {currentCombo && currentCombo.stock > 0 && (
+                  {/* Add to cart: variant selected vs. base product */}
+                  {comboIndex === null ? (
+                    product?.stock !== undefined && product.stock <= 0 ? (
+                      <Button size="lg" className="w-full" disabled>
+                        Producto sin stock
+                      </Button>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-4">
+                          <span className="text-sm font-medium text-foreground">Cantidad:</span>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                              disabled={quantity <= 1}
+                            >
+                              <Minus className="h-4 w-4" />
+                            </Button>
+                            <span className="w-12 text-center font-medium">{quantity}</span>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() => setQuantity((q) => q + 1)}
+                              disabled={product.stock !== undefined && quantity >= product.stock}
+                            >
+                              <Plus className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+
+                        <Button
+                          size="lg"
+                          className={cn(
+                            "w-full gap-2 transition-all duration-300",
+                            showSuccess && "bg-green-600 hover:bg-green-600"
+                          )}
+                          onClick={handleAddSimpleToCart}
+                          disabled={isAddingToCart || showSuccess}
+                        >
+                          {showSuccess ? (
+                            <>
+                              <Check className="h-5 w-5 animate-in zoom-in duration-200" />
+                              <span className="animate-in fade-in duration-200">Agregado al Carrito</span>
+                            </>
+                          ) : isAddingToCart ? (
+                            <>
+                              <Loader2 className="h-5 w-5 animate-spin" />
+                              Agregando...
+                            </>
+                          ) : (
+                            <>
+                              <ShoppingCart className="h-5 w-5" />
+                              Agregar al Carrito
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    )
+                  ) : currentCombo && currentCombo.stock > 0 ? (
                     <div className="space-y-3">
                       <div className="flex items-center gap-4">
                         <span className="text-sm font-medium text-foreground">Cantidad:</span>
@@ -461,9 +538,7 @@ export default function ProductDetailPage() {
                         )}
                       </Button>
                     </div>
-                  )}
-
-                  {currentCombo && currentCombo.stock <= 0 && (
+                  ) : (
                     <Button size="lg" className="w-full" disabled variant="secondary">
                       Sin stock para esta variante
                     </Button>

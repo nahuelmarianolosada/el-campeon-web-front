@@ -228,6 +228,118 @@ export async function createPayment(
   return response.json()
 }
 
+// Guest checkout API
+export interface GuestContactInfo {
+  name: string
+  email: string
+  phone?: string
+}
+
+export interface GuestOrderItem {
+  sku: string
+  quantity: number
+  price: number
+}
+
+export interface GuestOrder extends Order {
+  guest_token: string
+}
+
+export interface GuestSession {
+  guest_token: string
+  email: string
+  expires_at: string
+}
+
+export async function verifyGuestEmail(email: string): Promise<boolean> {
+  const response = await fetch(`${API_URL}/api/guest/verify-email`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  })
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.message || "Error al enviar el código de verificación")
+  }
+  // 202 = sesión ya verificada, 200 = código enviado
+  return response.status === 202
+}
+
+export async function confirmGuestEmail(email: string, verificationCode: string): Promise<GuestSession> {
+  const response = await fetch(`${API_URL}/api/guest/confirm-email`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, verification_code: verificationCode }),
+  })
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.message || "Código incorrecto o expirado")
+  }
+  return response.json()
+}
+
+export async function createGuestOrder(
+  contactInfo: GuestContactInfo,
+  items: GuestOrderItem[],
+  shippingAddress: ShippingAddress,
+  deliveryMethod: DeliveryMethod,
+  guestToken: string,
+  notes?: string
+): Promise<GuestOrder> {
+  const response = await fetch(`${API_URL}/api/orders/guest`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Guest-Token": guestToken,
+    },
+    body: JSON.stringify({
+      guest_name: contactInfo.name,
+      guest_email: contactInfo.email,
+      guest_phone: contactInfo.phone || undefined,
+      items,
+      shipping_address: shippingAddress,
+      delivery_method: deliveryMethod,
+      notes,
+    }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.message || "Error al crear la orden")
+  }
+  return response.json()
+}
+
+export type GuestApiPaymentMethod = Exclude<ApiPaymentMethod, "MP_SAVED">
+
+export async function createGuestPayment(
+  orderId: number,
+  email: string,
+  amount: number,
+  paymentMethod: GuestApiPaymentMethod,
+  guestToken: string
+): Promise<Payment> {
+  const response = await fetch(`${API_URL}/api/payments/guest`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Guest-Token": guestToken,
+    },
+    body: JSON.stringify({
+      order_id: orderId,
+      email,
+      amount,
+      payment_method: paymentMethod,
+    }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.message || "Error al procesar el pago")
+  }
+  return response.json()
+}
+
 export async function getPaymentByOrderId(token: string, orderId: number): Promise<Payment> {
   const response = await fetch(`${API_URL}/api/payments/order/${orderId}`, {
     headers: { Authorization: `Bearer ${token}` },

@@ -26,7 +26,12 @@ import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { useCart } from "@/lib/cart-context"
 import { useAuth } from "@/lib/auth-context"
-import { createOrder, createPayment, type ApiPaymentMethod } from "@/lib/api"
+import {
+  createOrder, createPayment, createGuestOrder, createGuestPayment,
+  verifyGuestEmail, confirmGuestEmail,
+  type ApiPaymentMethod, type GuestApiPaymentMethod, type GuestContactInfo,
+  type GuestSession,
+} from "@/lib/api"
 
 type DeliveryMethod = "shipping" | "pickup-libreria" | "pickup-jugueteria"
 type PaymentMethod = "mp-saved" | "mp-installments" | "mp-card" | "cash"
@@ -98,18 +103,14 @@ export default function CheckoutPage() {
   const [notes, setNotes] = useState("")
   const [isProcessing, setIsProcessing] = useState(false)
   const [error, setError] = useState("")
+  const [guestInfo, setGuestInfo] = useState<GuestContactInfo>({ name: "", email: "", phone: "" })
+  const [verificationStep, setVerificationStep] = useState<"form" | "verify">("form")
+  const [verificationCode, setVerificationCode] = useState("")
+  const [guestSession, setGuestSession] = useState<GuestSession | null>(null)
 
   useEffect(() => {
-    if (!authLoading && !user) {
-      router.push("/login")
-    }
-  }, [user, authLoading, router])
-
-  useEffect(() => {
-    if (token) {
-      fetchCart()
-    }
-  }, [token, fetchCart])
+    fetchCart()
+  }, [fetchCart])
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat("es-AR", {
@@ -129,30 +130,108 @@ export default function CheckoutPage() {
     }
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!token || !cart) return
+  const runGuestCheckout = async (session: GuestSession) => {
+    const guestItems = cart!.items.map((item) => ({
+      sku: item.product.sku,
+      quantity: item.quantity,
+      price: item.price,
+    }))
+    const guestOrder = await createGuestOrder(
+      guestInfo,
+      guestItems,
+      getEffectiveAddress(),
+      deliveryMethod,
+      session.guest_token,
+      notes || undefined
+    )
+    const payment = await createGuestPayment(
+      guestOrder.id,
+      session.email,
+      guestOrder.total,
+      PAYMENT_METHOD_MAP[paymentMethod] as GuestApiPaymentMethod,
+      session.guest_token
+    )
+    localStorage.setItem(
+      "guest_order_confirmation",
+      JSON.stringify({ order: guestOrder, payment, guestInfo })
+    )
+    await clearCart()
+    if (payment.mercadopago_preference_id) {
+      window.open(
+        `https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=${payment.mercadopago_preference_id}`,
+        "_blank",
+        "noopener,noreferrer"
+      )
+    }
+    router.push("/pedido-confirmado")
+  }
 
+  const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    if (!cart) return
+
+    // ── Authenticated flow ──────────────────────────────────────────────────
+    if (token) {
+      setError("")
+      setIsProcessing(true)
+      try {
+        const order = await createOrder(token, getEffectiveAddress(), deliveryMethod, notes || undefined)
+        const payment = await createPayment(token, order.id, order.total, PAYMENT_METHOD_MAP[paymentMethod])
+        await clearCart()
+        if (paymentMethod === "cash") {
+          router.push(`/mis-ordenes/${order.id}?success=true&payment=cash&txn=${payment.transaction_id}`)
+        } else {
+          if (payment.mercadopago_preference_id) {
+            window.open(
+              `https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=${payment.mercadopago_preference_id}`,
+              "_blank",
+              "noopener,noreferrer"
+            )
+          }
+          router.push(`/mis-ordenes/${order.id}?success=true`)
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Error al procesar el pedido")
+      } finally {
+        setIsProcessing(false)
+      }
+      return
+    }
+
+    // ── Guest flow — step 1: send verification code ─────────────────────────
+    if (verificationStep === "form") {
+      if (!guestInfo.name.trim() || !guestInfo.email.trim()) {
+        setError("Completá tu nombre y email para continuar")
+        return
+      }
+      setError("")
+      setIsProcessing(true)
+      try {
+        const alreadyVerified = await verifyGuestEmail(guestInfo.email)
+        if (alreadyVerified && guestSession) {
+          await runGuestCheckout(guestSession)
+        } else {
+          setVerificationStep("verify")
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Error al enviar el código")
+      } finally {
+        setIsProcessing(false)
+      }
+      return
+    }
+
+    // ── Guest flow — step 2: confirm code → create order + payment ──────────
+    if (verificationCode.length !== 6) {
+      setError("Ingresá el código de 6 dígitos que enviamos a tu email")
+      return
+    }
     setError("")
     setIsProcessing(true)
-
     try {
-      const order = await createOrder(token, getEffectiveAddress(), deliveryMethod, notes || undefined)
-      const payment = await createPayment(token, order.id, order.total, PAYMENT_METHOD_MAP[paymentMethod])
-      await clearCart()
-
-      if (paymentMethod === "cash") {
-        router.push(`/mis-ordenes/${order.id}?success=true&payment=cash&txn=${payment.transaction_id}`)
-      } else if (payment.mercadopago_preference_id) {
-        window.open(
-          `https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=${payment.mercadopago_preference_id}`,
-          "_blank",
-          "noopener,noreferrer"
-        )
-        router.push(`/mis-ordenes/${order.id}?success=true`)
-      } else {
-        router.push(`/mis-ordenes/${order.id}?success=true`)
-      }
+      const session = await confirmGuestEmail(guestInfo.email, verificationCode)
+      setGuestSession(session)
+      await runGuestCheckout(session)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al procesar el pedido")
     } finally {
@@ -220,6 +299,100 @@ export default function CheckoutPage() {
               <div className="lg:col-span-2 space-y-6">
                 {error && (
                   <div className="rounded-md bg-destructive/10 p-4 text-sm text-destructive">{error}</div>
+                )}
+
+                {/* ── Email verification step (guest only) ─────────────── */}
+                {!user && verificationStep === "verify" ? (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Verificá tu email</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <p className="text-sm text-muted-foreground">
+                        Enviamos un código de 6 dígitos a{" "}
+                        <span className="font-semibold text-foreground">{guestInfo.email}</span>.
+                        Ingresalo para confirmar tu pedido.
+                      </p>
+                      <div className="space-y-2">
+                        <Label htmlFor="verification_code">Código de verificación</Label>
+                        <Input
+                          id="verification_code"
+                          placeholder="123456"
+                          maxLength={6}
+                          value={verificationCode}
+                          onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ""))}
+                          className="text-center text-2xl tracking-[0.5em] font-mono"
+                          disabled={isProcessing}
+                          autoFocus
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <button
+                          type="button"
+                          className="text-muted-foreground hover:text-foreground underline"
+                          onClick={() => { setVerificationStep("form"); setVerificationCode(""); setError("") }}
+                          disabled={isProcessing}
+                        >
+                          ← Cambiar datos de contacto
+                        </button>
+                        <button
+                          type="button"
+                          className="text-primary hover:underline"
+                          onClick={async () => {
+                            try { await verifyGuestEmail(guestInfo.email) } catch { /* silent */ }
+                          }}
+                          disabled={isProcessing}
+                        >
+                          Reenviar código
+                        </button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <>
+                {/* Guest contact info */}
+                {!user && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Tus datos de contacto</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="guest_name">Nombre completo *</Label>
+                        <Input
+                          id="guest_name"
+                          placeholder="Juan Pérez"
+                          value={guestInfo.name}
+                          onChange={(e) => setGuestInfo((prev) => ({ ...prev, name: e.target.value }))}
+                          required
+                          disabled={isProcessing}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="guest_email">Email *</Label>
+                        <Input
+                          id="guest_email"
+                          type="email"
+                          placeholder="juan@ejemplo.com"
+                          value={guestInfo.email}
+                          onChange={(e) => setGuestInfo((prev) => ({ ...prev, email: e.target.value }))}
+                          required
+                          disabled={isProcessing}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="guest_phone">Teléfono (opcional)</Label>
+                        <Input
+                          id="guest_phone"
+                          type="tel"
+                          placeholder="+54 9 388 123 4567"
+                          value={guestInfo.phone ?? ""}
+                          onChange={(e) => setGuestInfo((prev) => ({ ...prev, phone: e.target.value }))}
+                          disabled={isProcessing}
+                        />
+                      </div>
+                    </CardContent>
+                  </Card>
                 )}
 
                 {/* Delivery Method */}
@@ -373,7 +546,7 @@ export default function CheckoutPage() {
                     <CardTitle>Método de Pago</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    {PAYMENT_OPTIONS.map((option) => (
+                    {PAYMENT_OPTIONS.filter((o) => user || o.id !== "mp-saved").map((option) => (
                       <label
                         key={option.id}
                         className={`flex items-start gap-4 rounded-lg border p-4 cursor-pointer transition-colors ${
@@ -461,6 +634,8 @@ export default function CheckoutPage() {
                     </div>
                   </CardContent>
                 </Card>
+                  </>
+                )}
               </div>
 
               {/* Order Summary */}
