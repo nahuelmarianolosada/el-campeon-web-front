@@ -147,7 +147,7 @@ export default function CheckoutPage() {
     const payment = await createGuestPayment(
       guestOrder.id,
       session.email,
-      guestOrder.total,
+      total,
       PAYMENT_METHOD_MAP[paymentMethod] as GuestApiPaymentMethod,
       session.guest_token
     )
@@ -176,7 +176,7 @@ export default function CheckoutPage() {
       setIsProcessing(true)
       try {
         const order = await createOrder(token, getEffectiveAddress(), deliveryMethod, notes || undefined)
-        const payment = await createPayment(token, order.id, order.total, PAYMENT_METHOD_MAP[paymentMethod])
+        const payment = await createPayment(token, order.id, total, PAYMENT_METHOD_MAP[paymentMethod])
         await clearCart()
         if (paymentMethod === "cash") {
           router.push(`/mis-ordenes/${order.id}?success=true&payment=cash&txn=${payment.transaction_id}`)
