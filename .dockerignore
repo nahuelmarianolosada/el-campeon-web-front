@@ -1,0 +1,10 @@
+node_modules
+.next
+.git
+.github
+.claude
+*.tsbuildinfo
+npm-debug.log*
+.env*
+README.md
+deploy-ec2.prompt
