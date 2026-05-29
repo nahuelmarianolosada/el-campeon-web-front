@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, Suspense } from "react"
 import Link from "next/link"
 import Image from "next/image"
 import { useSearchParams } from "next/navigation"
@@ -41,7 +41,7 @@ const DELIVERY_ICONS: Record<string, React.ReactNode> = {
   "pickup-jugueteria": <Store className="h-5 w-5 shrink-0" />,
 }
 
-export default function PedidoConfirmadoPage() {
+function PedidoConfirmadoContent() {
   const searchParams = useSearchParams()
   const [confirmation, setConfirmation] = useState<GuestOrderConfirmation | null>(null)
   const [notFound, setNotFound] = useState(false)
@@ -269,5 +269,13 @@ export default function PedidoConfirmadoPage() {
 
       <Footer />
     </div>
+  )
+}
+
+export default function PedidoConfirmadoPage() {
+  return (
+    <Suspense fallback={null}>
+      <PedidoConfirmadoContent />
+    </Suspense>
   )
 }
