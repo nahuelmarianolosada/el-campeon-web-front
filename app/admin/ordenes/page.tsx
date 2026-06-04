@@ -36,8 +36,10 @@ import {
   getOrdersReport,
   getPaymentByOrderId,
   updateOrderStatus,
+  updatePaymentStatus,
   orderStatusLabels,
   paymentStatusLabels,
+  paymentStatusTransitions,
   paymentMethodLabels,
   type OrderReport,
   type Payment,
@@ -88,6 +90,7 @@ export default function AdminOrdenesPage() {
   const [orderStatusFilter, setOrderStatusFilter] = useState("ALL")
   const [paymentStatusFilter, setPaymentStatusFilter] = useState("ALL")
   const [updatingId, setUpdatingId] = useState<number | null>(null)
+  const [updatingPaymentId, setUpdatingPaymentId] = useState<number | null>(null)
   const [updateError, setUpdateError] = useState<string | null>(null)
 
   const isAdmin = user?.role === "ADMIN"
@@ -159,6 +162,31 @@ export default function AdminOrdenesPage() {
       setUpdateError(err instanceof Error ? err.message : "Error al actualizar")
     } finally {
       setUpdatingId(null)
+    }
+  }
+
+  const handlePaymentStatusUpdate = async (
+    orderId: number,
+    paymentId: number,
+    newStatus: string
+  ) => {
+    if (!token) return
+    setUpdatingPaymentId(paymentId)
+    setUpdateError(null)
+    try {
+      const updated = await updatePaymentStatus(token, paymentId, newStatus)
+      setData((prev) =>
+        prev.map(({ order, payment }) => {
+          if (order.id !== orderId) return { order, payment }
+          const nextOrder =
+            newStatus === "APPROVED" ? { ...order, status: "CONFIRMED" } : order
+          return { order: nextOrder, payment: updated }
+        })
+      )
+    } catch (err) {
+      setUpdateError(err instanceof Error ? err.message : "Error al actualizar el pago")
+    } finally {
+      setUpdatingPaymentId(null)
     }
   }
 
@@ -348,12 +376,48 @@ export default function AdminOrdenesPage() {
                         </TableCell>
                         <TableCell>
                           {payment ? (
-                            <Badge
-                              variant="outline"
-                              className={`text-xs ${paymentStatusColors[payment.status] || ""}`}
-                            >
-                              {paymentStatusLabels[payment.status] || payment.status}
-                            </Badge>
+                            (() => {
+                              const allowed = paymentStatusTransitions[payment.status] ?? []
+                              const canEdit = allowed.length > 0
+                              return (
+                                <div className="flex flex-col gap-1.5">
+                                  <Badge
+                                    variant="outline"
+                                    className={`text-xs ${paymentStatusColors[payment.status] || ""}`}
+                                  >
+                                    {paymentStatusLabels[payment.status] || payment.status}
+                                  </Badge>
+                                  {canEdit && (
+                                    <Select
+                                      value={payment.status}
+                                      onValueChange={(val) =>
+                                        val !== payment.status &&
+                                        handlePaymentStatusUpdate(order.id, payment.id, val)
+                                      }
+                                      disabled={updatingPaymentId === payment.id}
+                                    >
+                                      <SelectTrigger className="h-7 text-xs w-36">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem
+                                          value={payment.status}
+                                          className="text-xs"
+                                          disabled
+                                        >
+                                          {paymentStatusLabels[payment.status] || payment.status}
+                                        </SelectItem>
+                                        {allowed.map((s) => (
+                                          <SelectItem key={s} value={s} className="text-xs">
+                                            {paymentStatusLabels[s] || s}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  )}
+                                </div>
+                              )
+                            })()
                           ) : (
                             <span className="text-xs text-muted-foreground">—</span>
                           )}
