@@ -374,6 +374,32 @@ export async function updateOrderStatus(token: string, orderId: number, status: 
   }
 }
 
+export async function updatePaymentStatus(token: string, paymentId: number, status: string): Promise<Payment> {
+  const response = await fetch(`${API_URL}/api/payments/${paymentId}/status`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ status }),
+  })
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.error || error.message || "Error al actualizar estado del pago")
+  }
+  return response.json()
+}
+
+// Valid payment status transitions (mirrors backend rules in
+// internal/services/payment/status). Used to gate the admin UI.
+export const paymentStatusTransitions: Record<string, string[]> = {
+  PENDING: ["APPROVED", "REJECTED", "CANCELLED"],
+  APPROVED: ["CANCELLED", "REFUNDED"],
+  REJECTED: [],
+  CANCELLED: [],
+  REFUNDED: [],
+}
+
 // Reports
 export interface OrderReport {
   id: number
