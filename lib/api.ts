@@ -148,6 +148,59 @@ export async function updateProduct(token: string, id: number, data: Partial<Cre
   return response.json()
 }
 
+export type ImportAction = "create" | "update" | "error"
+
+export interface ImportRow {
+  line_number: number
+  action: ImportAction
+  sku: string
+  name?: string
+  description?: string
+  category?: string
+  price_retail?: number
+  price_wholesale?: number
+  stock?: number
+  min_bulk_quantity?: number
+  image_urls?: string[]
+  is_active?: boolean
+  existing_id?: number
+  errors?: string[]
+}
+
+export interface ImportResult {
+  dry_run: boolean
+  total: number
+  to_create: number
+  to_update: number
+  errors: number
+  created?: number
+  updated?: number
+  skipped?: number
+  rows: ImportRow[]
+}
+
+export async function importProducts(
+  token: string,
+  file: File,
+  dryRun: boolean
+): Promise<ImportResult> {
+  const formData = new FormData()
+  formData.append("file", file)
+  formData.append("dry_run", dryRun ? "true" : "false")
+
+  const response = await fetch(`${API_URL}/api/products/import`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  })
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.error || error.message || "Error al importar productos")
+  }
+  return response.json()
+}
+
 export async function deleteProduct(token: string, id: number): Promise<void> {
   const response = await fetch(`${API_URL}/api/products/${id}`, {
     method: "DELETE",

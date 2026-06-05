@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
-import { Search, Filter, X, Package, Plus } from "lucide-react"
+import { Search, Filter, X, Package, Plus, FileSpreadsheet } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -11,6 +11,7 @@ import { Footer } from "@/components/footer"
 import { ProductCard } from "@/components/product-card"
 import { ProductFormModal } from "@/components/product-form-modal"
 import { DeleteProductDialog } from "@/components/delete-product-dialog"
+import { ImportProductsModal } from "@/components/import-products-modal"
 import { getProducts, getProductsByCategory, type Product } from "@/lib/api"
 import { useCart } from "@/lib/cart-context"
 import { useAuth } from "@/lib/auth-context"
@@ -18,6 +19,7 @@ import { useAuth } from "@/lib/auth-context"
 function ProductsContent() {
   const searchParams = useSearchParams()
   const categoryParam = searchParams.get("categoria")
+  const importParam = searchParams.get("import")
 
   const [products, setProducts] = useState<Product[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -29,6 +31,7 @@ function ProductsContent() {
   // Admin state
   const [isFormModalOpen, setIsFormModalOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false)
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
 
   const isAdmin = user?.role === "ADMIN"
@@ -66,6 +69,13 @@ function ProductsContent() {
   useEffect(() => {
     setSelectedCategory(categoryParam)
   }, [categoryParam])
+
+  const isAdminForImport = user?.role === "ADMIN"
+  useEffect(() => {
+    if (importParam === "1" && isAdminForImport) {
+      setIsImportModalOpen(true)
+    }
+  }, [importParam, isAdminForImport])
 
   const filteredProducts = products.filter((product) =>
     product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -125,10 +135,20 @@ function ProductsContent() {
                 : "Encontrá todo lo que necesitás"}
             </p>
             {isAdmin && (
-              <Button onClick={handleAddProduct} className="mt-4 gap-2">
-                <Plus className="h-4 w-4" />
-                Agregar Producto
-              </Button>
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
+                <Button onClick={handleAddProduct} className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  Agregar Producto
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setIsImportModalOpen(true)}
+                  className="gap-2"
+                >
+                  <FileSpreadsheet className="h-4 w-4" />
+                  Importar Excel/CSV
+                </Button>
+              </div>
             )}
           </div>
         </section>
@@ -234,6 +254,11 @@ function ProductsContent() {
             open={isDeleteDialogOpen}
             onOpenChange={setIsDeleteDialogOpen}
             product={selectedProduct}
+            onSuccess={handleProductSuccess}
+          />
+          <ImportProductsModal
+            open={isImportModalOpen}
+            onOpenChange={setIsImportModalOpen}
             onSuccess={handleProductSuccess}
           />
         </>
