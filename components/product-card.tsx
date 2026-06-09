@@ -2,9 +2,10 @@
 
 import Image from "next/image"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import {
   ShoppingCart, Package, Pencil, Trash2, Plus, Minus, Check,
-  ChevronLeft, ChevronRight, Loader2,
+  ChevronLeft, ChevronRight, Loader2, Boxes,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter } from "@/components/ui/card"
@@ -22,6 +23,7 @@ interface ProductCardProps {
 }
 
 export function ProductCard({ product, onEdit, onDelete }: ProductCardProps) {
+  const router = useRouter()
   const { addToCart } = useCart()
   const { user } = useAuth()
   const [isAdding, setIsAdding] = useState(false)
@@ -283,6 +285,19 @@ export function ProductCard({ product, onEdit, onDelete }: ProductCardProps) {
 
           {isAdmin && (
             <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+              <Button
+                size="icon"
+                variant="secondary"
+                className="h-8 w-8"
+                title="Stock por sucursal"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  router.push(`/admin/productos/${product.id}/stock`)
+                }}
+              >
+                <Boxes className="h-4 w-4" />
+              </Button>
               <Button
                 size="icon"
                 variant="secondary"

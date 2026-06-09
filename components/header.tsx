@@ -3,7 +3,7 @@
 import Link from "next/link"
 import Image from "next/image"
 import { useState } from "react"
-import { ShoppingCart, User, Menu, X, LogOut, Package, Search, ClipboardList, FileSpreadsheet } from "lucide-react"
+import { ShoppingCart, User, Menu, X, LogOut, Package, Search, ClipboardList, FileSpreadsheet, Store, Truck, LayoutDashboard } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -118,9 +118,27 @@ export function Header() {
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem asChild>
+                      <Link href="/admin" className="flex items-center gap-2">
+                        <LayoutDashboard className="h-4 w-4" />
+                        Panel Admin
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
                       <Link href="/admin/ordenes" className="flex items-center gap-2">
                         <ClipboardList className="h-4 w-4" />
                         Gestión de Órdenes
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link href="/admin/sucursales" className="flex items-center gap-2">
+                        <Store className="h-4 w-4" />
+                        Sucursales
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link href="/admin/envios" className="flex items-center gap-2">
+                        <Truck className="h-4 w-4" />
+                        Zonas y tarifas de envío
                       </Link>
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild>
