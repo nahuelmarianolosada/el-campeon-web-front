@@ -11,7 +11,7 @@ export function Footer() {
           <div className="flex flex-col gap-4">
             <Link href="/" className="flex items-center gap-3">
               <Image
-                src="/images/el-campeon-logo.png"
+                src="/images/el_campeon_logo.png"
                 alt="El Campeón"
                 width={64}
                 height={64}
