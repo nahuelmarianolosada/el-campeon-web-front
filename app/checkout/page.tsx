@@ -29,11 +29,12 @@ import { useAuth } from "@/lib/auth-context"
 import {
   createOrder, createPayment, createGuestOrder, createGuestPayment,
   verifyGuestEmail, confirmGuestEmail,
+  listBranches, getShippingQuote,
   type ApiPaymentMethod, type GuestApiPaymentMethod, type GuestContactInfo,
-  type GuestSession,
+  type GuestSession, type Branch, type ShippingQuote,
 } from "@/lib/api"
 
-type DeliveryMethod = "shipping" | "pickup-libreria" | "pickup-jugueteria"
+type DeliveryMethod = "shipping" | "pickup"
 type PaymentMethod = "mp-saved" | "mp-installments" | "mp-card" | "cash"
 
 const PAYMENT_METHOD_MAP: Record<PaymentMethod, ApiPaymentMethod> = {
@@ -41,17 +42,6 @@ const PAYMENT_METHOD_MAP: Record<PaymentMethod, ApiPaymentMethod> = {
   "mp-installments": "MP_INSTALLMENTS",
   "mp-card": "MP_CARD",
   cash: "CASH",
-}
-
-const PICKUP_LOCATIONS: Record<Exclude<DeliveryMethod, "shipping">, { name: string; address: string }> = {
-  "pickup-libreria": {
-    name: "Librería El Campeón",
-    address: "Güemes 901, San Salvador de Jujuy, Jujuy, Argentina",
-  },
-  "pickup-jugueteria": {
-    name: "Juguetería El Campeón",
-    address: "Güemes 1045, San Salvador de Jujuy, Jujuy, Argentina",
-  },
 }
 
 const PAYMENT_OPTIONS: { id: PaymentMethod; label: string; description: string; icon: ReactNode }[] = [
@@ -108,9 +98,56 @@ export default function CheckoutPage() {
   const [verificationCode, setVerificationCode] = useState("")
   const [guestSession, setGuestSession] = useState<GuestSession | null>(null)
 
+  // Sucursales para retiro y cotización de envío
+  const [branches, setBranches] = useState<Branch[]>([])
+  const [pickupBranchId, setPickupBranchId] = useState<number | null>(null)
+  const [shippingQuote, setShippingQuote] = useState<ShippingQuote | null>(null)
+  const [quoteLoading, setQuoteLoading] = useState(false)
+  const [quoteError, setQuoteError] = useState<string | null>(null)
+
   useEffect(() => {
     fetchCart()
   }, [fetchCart])
+
+  // Cargar sucursales una vez
+  useEffect(() => {
+    listBranches({ onlyActive: true })
+      .then((bs) => {
+        setBranches(bs)
+        const firstPickup = bs.find((b) => b.is_pickup_point)
+        if (firstPickup) setPickupBranchId(firstPickup.id)
+      })
+      .catch(() => { /* silent — pickup queda sin opciones, el front muestra fallback */ })
+  }, [])
+
+  // Cotizar envío al cambiar el CP / items / método (debounced)
+  useEffect(() => {
+    if (deliveryMethod !== "shipping") {
+      setShippingQuote(null)
+      setQuoteError(null)
+      return
+    }
+    const cp = shippingAddress.postal_code.trim()
+    if (!cp || !cart || cart.items.length === 0) {
+      setShippingQuote(null)
+      setQuoteError(null)
+      return
+    }
+    const subtotal = cart.total
+    const items = cart.items.map((it) => ({ product_id: it.product.id, quantity: it.quantity }))
+    const handle = setTimeout(() => {
+      setQuoteLoading(true)
+      setQuoteError(null)
+      getShippingQuote(cp, subtotal, items)
+        .then((q) => setShippingQuote(q))
+        .catch((err: Error & { code?: string }) => {
+          setShippingQuote(null)
+          setQuoteError(err.code ?? err.message)
+        })
+        .finally(() => setQuoteLoading(false))
+    }, 500)
+    return () => clearTimeout(handle)
+  }, [deliveryMethod, shippingAddress.postal_code, cart])
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat("es-AR", {
@@ -119,15 +156,38 @@ export default function CheckoutPage() {
     }).format(price)
   }
 
+  const selectedPickupBranch = branches.find((b) => b.id === pickupBranchId) ?? null
+
   const getEffectiveAddress = () => {
     if (deliveryMethod === "shipping") return shippingAddress
-    const loc = PICKUP_LOCATIONS[deliveryMethod]
-    return {
-      street: loc.address,
-      city: "San Salvador de Jujuy",
-      postal_code: "4600",
-      country: "Argentina",
+    if (selectedPickupBranch) {
+      return {
+        street: selectedPickupBranch.address,
+        city: "San Salvador de Jujuy",
+        postal_code: "4600",
+        country: "Argentina",
+      }
     }
+    return shippingAddress
+  }
+
+  const checkoutOptions = () => {
+    if (deliveryMethod === "shipping" && shippingQuote) {
+      return {
+        originBranchId: shippingQuote.origin_branch_id,
+        deliveryZoneId: shippingQuote.zone.id,
+        shippingCost: shippingQuote.cost,
+        notes: notes || undefined,
+      }
+    }
+    if (deliveryMethod === "pickup" && pickupBranchId) {
+      return {
+        originBranchId: pickupBranchId,
+        shippingCost: 0,
+        notes: notes || undefined,
+      }
+    }
+    return { notes: notes || undefined }
   }
 
   const runGuestCheckout = async (session: GuestSession) => {
@@ -142,7 +202,7 @@ export default function CheckoutPage() {
       getEffectiveAddress(),
       deliveryMethod,
       session.guest_token,
-      notes || undefined
+      checkoutOptions()
     )
     const payment = await createGuestPayment(
       guestOrder.id,
@@ -175,7 +235,7 @@ export default function CheckoutPage() {
       setError("")
       setIsProcessing(true)
       try {
-        const order = await createOrder(token, getEffectiveAddress(), deliveryMethod, notes || undefined)
+        const order = await createOrder(token, getEffectiveAddress(), deliveryMethod, checkoutOptions())
         const payment = await createPayment(token, order.id, total, PAYMENT_METHOD_MAP[paymentMethod])
         await clearCart()
         if (paymentMethod === "cash") {
@@ -276,7 +336,19 @@ export default function CheckoutPage() {
 
   const subtotal = cart.total
   const tax = subtotal * 0.21
-  const total = subtotal + tax
+  const shippingCost = deliveryMethod === "shipping" ? (shippingQuote?.cost ?? 0) : 0
+  const total = subtotal + tax + shippingCost
+
+  // Reglas para habilitar el botón "Confirmar"
+  const canSubmit = (() => {
+    if (isProcessing) return false
+    if (deliveryMethod === "shipping") {
+      if (!shippingQuote) return false
+      if (!shippingQuote.in_stock) return false
+    }
+    if (deliveryMethod === "pickup" && !pickupBranchId) return false
+    return true
+  })()
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -425,61 +497,37 @@ export default function CheckoutPage() {
                       </div>
                     </label>
 
-                    {/* Pickup: Librería */}
-                    <label
-                      className={`flex items-start gap-4 rounded-lg border p-4 cursor-pointer transition-colors ${
-                        deliveryMethod === "pickup-libreria"
-                          ? "border-primary bg-primary/5"
-                          : "border-border hover:bg-muted/40"
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="deliveryMethod"
-                        value="pickup-libreria"
-                        checked={deliveryMethod === "pickup-libreria"}
-                        onChange={() => setDeliveryMethod("pickup-libreria")}
-                        className="mt-1 accent-primary"
-                        disabled={isProcessing}
-                      />
-                      <Store className="h-5 w-5 mt-0.5 shrink-0 text-muted-foreground" />
-                      <div>
-                        <p className="font-medium text-foreground">Retiro en Librería El Campeón</p>
-                        <p className="text-sm text-muted-foreground flex items-center gap-1">
-                          <MapPin className="h-3 w-3" />
-                          Güemes 901, San Salvador de Jujuy
-                        </p>
-                        <p className="text-xs text-primary mt-1">Sin costo de envío</p>
-                      </div>
-                    </label>
-
-                    {/* Pickup: Juguetería */}
-                    <label
-                      className={`flex items-start gap-4 rounded-lg border p-4 cursor-pointer transition-colors ${
-                        deliveryMethod === "pickup-jugueteria"
-                          ? "border-primary bg-primary/5"
-                          : "border-border hover:bg-muted/40"
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="deliveryMethod"
-                        value="pickup-jugueteria"
-                        checked={deliveryMethod === "pickup-jugueteria"}
-                        onChange={() => setDeliveryMethod("pickup-jugueteria")}
-                        className="mt-1 accent-primary"
-                        disabled={isProcessing}
-                      />
-                      <Store className="h-5 w-5 mt-0.5 shrink-0 text-muted-foreground" />
-                      <div>
-                        <p className="font-medium text-foreground">Retiro en Juguetería El Campeón</p>
-                        <p className="text-sm text-muted-foreground flex items-center gap-1">
-                          <MapPin className="h-3 w-3" />
-                          Güemes 1045, San Salvador de Jujuy
-                        </p>
-                        <p className="text-xs text-primary mt-1">Sin costo de envío</p>
-                      </div>
-                    </label>
+                    {/* Pickup genérico — sucursales dinámicas desde el backend */}
+                    {branches.filter((b) => b.is_pickup_point).map((branch) => {
+                      const isSelected = deliveryMethod === "pickup" && pickupBranchId === branch.id
+                      return (
+                        <label
+                          key={branch.id}
+                          className={`flex items-start gap-4 rounded-lg border p-4 cursor-pointer transition-colors ${
+                            isSelected ? "border-primary bg-primary/5" : "border-border hover:bg-muted/40"
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="deliveryMethod"
+                            value={`pickup-${branch.id}`}
+                            checked={isSelected}
+                            onChange={() => { setDeliveryMethod("pickup"); setPickupBranchId(branch.id) }}
+                            className="mt-1 accent-primary"
+                            disabled={isProcessing}
+                          />
+                          <Store className="h-5 w-5 mt-0.5 shrink-0 text-muted-foreground" />
+                          <div>
+                            <p className="font-medium text-foreground">Retiro en {branch.name}</p>
+                            <p className="text-sm text-muted-foreground flex items-center gap-1">
+                              <MapPin className="h-3 w-3" />
+                              {branch.address}
+                            </p>
+                            <p className="text-xs text-primary mt-1">Sin costo de envío</p>
+                          </div>
+                        </label>
+                      )
+                    })}
                   </CardContent>
                 </Card>
 
@@ -536,6 +584,52 @@ export default function CheckoutPage() {
                           disabled={isProcessing}
                         />
                       </div>
+
+                      {/* Feedback de cotización de envío */}
+                      {quoteLoading && (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Cotizando envío...
+                        </div>
+                      )}
+                      {!quoteLoading && quoteError === "POSTAL_CODE_NOT_COVERED" && (
+                        <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">
+                          No hacemos envíos a ese código postal. Probá con otro CP o elegí retiro en sucursal.
+                        </div>
+                      )}
+                      {!quoteLoading && quoteError && quoteError !== "POSTAL_CODE_NOT_COVERED" && (
+                        <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                          No pudimos cotizar el envío: {quoteError}
+                        </div>
+                      )}
+                      {!quoteLoading && shippingQuote && (
+                        <div className={`rounded-md border p-3 text-sm ${
+                          shippingQuote.in_stock
+                            ? "bg-primary/5 border-primary/20"
+                            : "bg-destructive/10 border-destructive/30 text-destructive"
+                        }`}>
+                          <p className="font-medium text-foreground">
+                            Envío a {shippingQuote.zone.name}:{" "}
+                            {shippingQuote.free_shipping_applied
+                              ? <span className="text-primary">Gratis</span>
+                              : formatPrice(shippingQuote.cost)}
+                          </p>
+                          <p className="text-muted-foreground">
+                            Llega en {shippingQuote.eta_min_days}–{shippingQuote.eta_max_days} días hábiles
+                            {" · "}sale desde {shippingQuote.origin_branch_name}
+                          </p>
+                          {shippingQuote.amount_for_free != null && shippingQuote.amount_for_free > 0 && (
+                            <p className="mt-1 text-primary">
+                              Sumá {formatPrice(shippingQuote.amount_for_free)} más y tu envío es gratis.
+                            </p>
+                          )}
+                          {!shippingQuote.in_stock && (
+                            <p className="mt-1">
+                              Algunos productos no tienen stock disponible para envío. Probá retiro en sucursal.
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 )}
@@ -655,10 +749,21 @@ export default function CheckoutPage() {
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Envío</span>
-                      <span className="text-muted-foreground">
-                        {deliveryMethod === "shipping" ? "Gratis" : "Retiro en local"}
+                      <span className={shippingCost === 0 ? "text-primary" : ""}>
+                        {deliveryMethod !== "shipping"
+                          ? "Retiro en sucursal"
+                          : shippingQuote == null
+                            ? quoteLoading ? "Cotizando..." : "Ingresá el CP"
+                            : shippingQuote.free_shipping_applied
+                              ? "Gratis"
+                              : formatPrice(shippingQuote.cost)}
                       </span>
                     </div>
+                    {deliveryMethod === "shipping" && shippingQuote && (
+                      <p className="text-xs text-muted-foreground">
+                        Llega en {shippingQuote.eta_min_days}–{shippingQuote.eta_max_days} días hábiles a {shippingQuote.zone.name}
+                      </p>
+                    )}
                     <Separator />
                     <div className="flex justify-between font-semibold text-lg">
                       <span>Total</span>
@@ -672,13 +777,13 @@ export default function CheckoutPage() {
                     </div>
 
                     {/* Pickup address summary */}
-                    {deliveryMethod !== "shipping" && (
+                    {deliveryMethod === "pickup" && selectedPickupBranch && (
                       <div className="rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
                         <p className="font-medium text-foreground mb-0.5">Retiro en</p>
-                        <p>{PICKUP_LOCATIONS[deliveryMethod].name}</p>
+                        <p>{selectedPickupBranch.name}</p>
                         <p className="flex items-center gap-1 mt-0.5">
                           <MapPin className="h-3 w-3 shrink-0" />
-                          {PICKUP_LOCATIONS[deliveryMethod].address}
+                          {selectedPickupBranch.address}
                         </p>
                       </div>
                     )}
@@ -688,7 +793,7 @@ export default function CheckoutPage() {
                       type="submit"
                       className="w-full gap-2"
                       size="lg"
-                      disabled={isProcessing}
+                      disabled={!canSubmit}
                     >
                       {isProcessing ? (
                         <Loader2 className="h-5 w-5 animate-spin" />

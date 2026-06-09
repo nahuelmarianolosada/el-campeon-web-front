@@ -29,7 +29,10 @@ export interface ProductsResponse {
   offset: number
 }
 
-export type DeliveryMethod = "shipping" | "pickup-libreria" | "pickup-jugueteria"
+// 'pickup' es el método nuevo y genérico — la sucursal vive en origin_branch_id.
+// Los valores 'pickup-libreria' y 'pickup-jugueteria' se conservan por
+// compatibilidad con órdenes históricas.
+export type DeliveryMethod = "shipping" | "pickup" | "pickup-libreria" | "pickup-jugueteria"
 export type ApiPaymentMethod = "MP_SAVED" | "MP_INSTALLMENTS" | "MP_CARD" | "CASH"
 
 export interface Order {
@@ -41,12 +44,82 @@ export interface Order {
   subtotal: number
   tax: number
   total: number
+  shipping_cost: number
   shipping_address: ShippingAddress
   delivery_method: DeliveryMethod
+  origin_branch_id?: number
+  delivery_zone_id?: number
   notes?: string
   created_at: string
   updated_at: string
 }
+
+// ===== Shipping / sucursales / zonas =====
+
+export interface Branch {
+  id: number
+  code: string
+  name: string
+  address: string
+  lat?: number
+  lng?: number
+  is_pickup_point: boolean
+  is_active: boolean
+}
+
+export type ZoneKind = "provincial" | "regional" | "departamental" | "barrial"
+
+export interface DeliveryZone {
+  id: number
+  name: string
+  kind: ZoneKind
+  parent_zone_id?: number
+  is_active: boolean
+}
+
+export interface DeliveryRate {
+  id: number
+  zone_id: number
+  origin_branch_id: number
+  cost: number
+  eta_min_days: number
+  eta_max_days: number
+  free_shipping_threshold?: number | null
+  is_active: boolean
+}
+
+export interface PostalCodeZone {
+  postal_code: string
+  zone_id: number
+}
+
+export interface BranchStock {
+  product_id: number
+  branch_id: number
+  branch_code?: string
+  branch_name?: string
+  stock: number
+  reserved: number
+  available: number
+}
+
+export interface ShippingQuote {
+  zone: { id: number; name: string; kind: ZoneKind }
+  origin_branch_id: number
+  origin_branch_name: string
+  cost: number
+  eta_min_days: number
+  eta_max_days: number
+  free_shipping_applied: boolean
+  amount_for_free?: number | null
+  in_stock: boolean
+  out_of_stock_items: number[]
+}
+
+export type ShippingQuoteError =
+  | "POSTAL_CODE_NOT_COVERED"
+  | "NO_BRANCH_HAS_STOCK"
+  | "NO_RATE_FOR_ZONE"
 
 export interface OrderItem {
   id: number
@@ -216,11 +289,18 @@ export async function deleteProduct(token: string, id: number): Promise<void> {
 }
 
 // Orders API
+export interface CreateOrderOptions {
+  originBranchId?: number
+  deliveryZoneId?: number
+  shippingCost?: number
+  notes?: string
+}
+
 export async function createOrder(
   token: string,
   shippingAddress: ShippingAddress,
   deliveryMethod: DeliveryMethod,
-  notes?: string
+  options: CreateOrderOptions = {}
 ): Promise<Order> {
   const response = await fetch(`${API_URL}/api/orders`, {
     method: "POST",
@@ -231,7 +311,10 @@ export async function createOrder(
     body: JSON.stringify({
       shipping_address: shippingAddress,
       delivery_method: deliveryMethod,
-      notes,
+      origin_branch_id: options.originBranchId,
+      delivery_zone_id: options.deliveryZoneId,
+      shipping_cost: options.shippingCost ?? 0,
+      notes: options.notes,
     }),
   })
 
@@ -337,7 +420,7 @@ export async function createGuestOrder(
   shippingAddress: ShippingAddress,
   deliveryMethod: DeliveryMethod,
   guestToken: string,
-  notes?: string
+  options: CreateOrderOptions = {}
 ): Promise<GuestOrder> {
   const response = await fetch(`${API_URL}/api/orders/guest`, {
     method: "POST",
@@ -352,7 +435,10 @@ export async function createGuestOrder(
       items,
       shipping_address: shippingAddress,
       delivery_method: deliveryMethod,
-      notes,
+      origin_branch_id: options.originBranchId,
+      delivery_zone_id: options.deliveryZoneId,
+      shipping_cost: options.shippingCost ?? 0,
+      notes: options.notes,
     }),
   })
 
@@ -690,8 +776,216 @@ export const paymentStatusLabels: Record<string, string> = {
 
 export const deliveryMethodLabels: Record<DeliveryMethod, string> = {
   shipping: "Envío a domicilio",
+  pickup: "Retiro en sucursal",
   "pickup-libreria": "Retiro en Librería El Campeón",
   "pickup-jugueteria": "Retiro en Juguetería El Campeón",
+}
+
+// ===== Shipping API =====
+
+export async function listBranches(opts: { onlyPickup?: boolean; onlyActive?: boolean } = {}): Promise<Branch[]> {
+  const params = new URLSearchParams()
+  if (opts.onlyPickup) params.set("is_pickup_point", "true")
+  if (opts.onlyActive) params.set("active", "true")
+  const qs = params.toString()
+  const response = await fetch(`${API_URL}/api/branches${qs ? `?${qs}` : ""}`)
+  if (!response.ok) throw new Error("Error al obtener sucursales")
+  const json = await response.json()
+  return json.data ?? []
+}
+
+export async function getShippingQuote(
+  postalCode: string,
+  subtotal: number,
+  items: Array<{ product_id: number; quantity: number }>
+): Promise<ShippingQuote> {
+  const response = await fetch(`${API_URL}/api/shipping/quote`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ postal_code: postalCode, subtotal, items }),
+  })
+  if (response.status === 422) {
+    const body = await response.json().catch(() => ({}))
+    const code = (body?.error as ShippingQuoteError) ?? "POSTAL_CODE_NOT_COVERED"
+    const err = new Error(code) as Error & { code: ShippingQuoteError }
+    err.code = code
+    throw err
+  }
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(body?.error || "Error al cotizar el envío")
+  }
+  return response.json()
+}
+
+// ---- Admin shipping (zonas, tarifas, CPs) ----
+
+export async function listDeliveryZones(token: string, onlyActive = false): Promise<DeliveryZone[]> {
+  const qs = onlyActive ? "?active=true" : ""
+  const response = await fetch(`${API_URL}/api/admin/delivery-zones${qs}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) throw new Error("Error al obtener zonas")
+  const json = await response.json()
+  return json.data ?? []
+}
+
+export async function createDeliveryZone(token: string, data: Omit<DeliveryZone, "id" | "is_active"> & { is_active?: boolean }): Promise<DeliveryZone> {
+  const response = await fetch(`${API_URL}/api/admin/delivery-zones`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data),
+  })
+  if (!response.ok) throw new Error("Error al crear zona")
+  return response.json()
+}
+
+export async function updateDeliveryZone(token: string, id: number, data: Partial<DeliveryZone>): Promise<DeliveryZone> {
+  const response = await fetch(`${API_URL}/api/admin/delivery-zones/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data),
+  })
+  if (!response.ok) throw new Error("Error al actualizar zona")
+  return response.json()
+}
+
+export async function deleteDeliveryZone(token: string, id: number): Promise<void> {
+  const response = await fetch(`${API_URL}/api/admin/delivery-zones/${id}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) throw new Error("Error al eliminar zona")
+}
+
+export async function listDeliveryRates(token: string, params: { zoneId?: number; branchId?: number } = {}): Promise<DeliveryRate[]> {
+  const qs = new URLSearchParams()
+  if (params.zoneId) qs.set("zone_id", String(params.zoneId))
+  if (params.branchId) qs.set("branch_id", String(params.branchId))
+  const url = `${API_URL}/api/admin/delivery-rates${qs.toString() ? `?${qs}` : ""}`
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  if (!response.ok) throw new Error("Error al obtener tarifas")
+  const json = await response.json()
+  return json.data ?? []
+}
+
+export async function createDeliveryRate(token: string, data: Omit<DeliveryRate, "id" | "is_active"> & { is_active?: boolean }): Promise<DeliveryRate> {
+  const response = await fetch(`${API_URL}/api/admin/delivery-rates`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data),
+  })
+  if (!response.ok) throw new Error("Error al crear tarifa")
+  return response.json()
+}
+
+export async function updateDeliveryRate(token: string, id: number, data: Partial<DeliveryRate>): Promise<DeliveryRate> {
+  const response = await fetch(`${API_URL}/api/admin/delivery-rates/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data),
+  })
+  if (!response.ok) throw new Error("Error al actualizar tarifa")
+  return response.json()
+}
+
+export async function deleteDeliveryRate(token: string, id: number): Promise<void> {
+  const response = await fetch(`${API_URL}/api/admin/delivery-rates/${id}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) throw new Error("Error al eliminar tarifa")
+}
+
+export async function listPostalCodes(token: string, zoneId?: number): Promise<PostalCodeZone[]> {
+  const qs = zoneId ? `?zone_id=${zoneId}` : ""
+  const response = await fetch(`${API_URL}/api/admin/postal-codes${qs}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) throw new Error("Error al obtener códigos postales")
+  const json = await response.json()
+  return json.data ?? []
+}
+
+export async function upsertPostalCode(token: string, postalCode: string, zoneId: number): Promise<void> {
+  const response = await fetch(`${API_URL}/api/admin/postal-codes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ postal_code: postalCode, zone_id: zoneId }),
+  })
+  if (!response.ok) throw new Error("Error al guardar el código postal")
+}
+
+export async function deletePostalCode(token: string, postalCode: string): Promise<void> {
+  const response = await fetch(`${API_URL}/api/admin/postal-codes/${encodeURIComponent(postalCode)}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) throw new Error("Error al eliminar el código postal")
+}
+
+// ---- Admin branches ----
+
+export async function listBranchesAdmin(token: string): Promise<Branch[]> {
+  const response = await fetch(`${API_URL}/api/admin/branches`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) throw new Error("Error al obtener sucursales")
+  const json = await response.json()
+  return json.data ?? []
+}
+
+export async function createBranch(token: string, data: Omit<Branch, "id">): Promise<Branch> {
+  const response = await fetch(`${API_URL}/api/admin/branches`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data),
+  })
+  if (!response.ok) throw new Error("Error al crear la sucursal")
+  return response.json()
+}
+
+export async function updateBranch(token: string, id: number, data: Partial<Branch>): Promise<Branch> {
+  const response = await fetch(`${API_URL}/api/admin/branches/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data),
+  })
+  if (!response.ok) throw new Error("Error al actualizar la sucursal")
+  return response.json()
+}
+
+export async function deleteBranch(token: string, id: number): Promise<void> {
+  const response = await fetch(`${API_URL}/api/admin/branches/${id}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) throw new Error("Error al eliminar la sucursal")
+}
+
+// ---- Stock por sucursal ----
+
+export async function getProductBranchStock(token: string, productId: number): Promise<BranchStock[]> {
+  const response = await fetch(`${API_URL}/api/admin/products/${productId}/stock`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) throw new Error("Error al obtener el stock por sucursal")
+  const json = await response.json()
+  return json.data ?? []
+}
+
+export async function setProductBranchStock(
+  token: string,
+  productId: number,
+  branchId: number,
+  stock: number
+): Promise<void> {
+  const response = await fetch(`${API_URL}/api/admin/products/${productId}/stock`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ branch_id: branchId, stock }),
+  })
+  if (!response.ok) throw new Error("Error al guardar el stock")
 }
 
 export const paymentMethodLabels: Record<ApiPaymentMethod, string> = {
