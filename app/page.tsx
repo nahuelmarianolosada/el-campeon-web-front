@@ -334,7 +334,7 @@ export default function HomePage() {
               </div>
               <div className="relative">
                 <Image
-                  src="/images/el-campeon-logo.png"
+                  src="/images/el_campeon_logo.png"
                   alt="El Campeón Logo"
                   width={320}
                   height={320}

@@ -139,7 +139,7 @@ export default function LoginPage() {
         <CardHeader className="text-center">
           <Link href="/" className="inline-flex justify-center mb-4">
             <Image
-              src="/images/el-campeon-logo.png"
+              src="/images/el_campeon_logo.png"
               alt="El Campeón"
               width={80}
               height={80}

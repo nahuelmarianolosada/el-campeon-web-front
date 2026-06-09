@@ -18,8 +18,8 @@ export const metadata: Metadata = {
   description: 'Tu librería y juguetería de confianza en Argentina. Libros, juguetes y más para toda la familia.',
   generator: 'v0.app',
   icons: {
-    icon: '/images/el-campeon-logo.png',
-    apple: '/images/el-campeon-logo.png',
+    icon: '/images/el_campeon_logo.png',
+    apple: '/images/el_campeon_logo.png',
   },
 }
 
