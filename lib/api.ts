@@ -529,6 +529,21 @@ export async function updatePaymentStatus(token: string, paymentId: number, stat
   return response.json()
 }
 
+export async function cancelPayment(token: string, paymentId: number): Promise<Payment> {
+  const response = await fetch(`${API_URL}/api/payments/${paymentId}/cancel`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+  })
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.error || error.message || "Error al cancelar el pago")
+  }
+  return response.json()
+}
+
 // Valid payment status transitions (mirrors backend rules in
 // internal/services/payment/status). Used to gate the admin UI.
 export const paymentStatusTransitions: Record<string, string[]> = {
