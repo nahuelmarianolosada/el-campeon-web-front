@@ -25,6 +25,7 @@ import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
+import { CancelPaymentDialog } from "@/components/cancel-payment-dialog"
 import { useAuth } from "@/lib/auth-context"
 import {
   getOrderById,
@@ -73,6 +74,7 @@ function OrderDetailContent() {
   const [payment, setPayment] = useState<Payment | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState("")
+  const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false)
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -147,6 +149,7 @@ function OrderDetailContent() {
     payment?.status === "PENDING"
   const isApproved = payment?.status === "APPROVED"
   const isRejected = payment?.status === "REJECTED"
+  const isCancellable = payment?.status === "PENDING" || payment?.status === "APPROVED"
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -332,6 +335,15 @@ function OrderDetailContent() {
                         {payment.transaction_id}
                       </span>
                     </div>
+                    {isCancellable && (
+                      <Button
+                        variant="outline"
+                        className="w-full mt-2 text-destructive hover:text-destructive"
+                        onClick={() => setIsCancelDialogOpen(true)}
+                      >
+                        {isApproved ? "Solicitar reembolso" : "Cancelar pago"}
+                      </Button>
+                    )}
                   </CardContent>
                 </Card>
               )}
@@ -383,6 +395,13 @@ function OrderDetailContent() {
           </div>
         </div>
       </main>
+
+      <CancelPaymentDialog
+        open={isCancelDialogOpen}
+        onOpenChange={setIsCancelDialogOpen}
+        payment={payment}
+        onSuccess={(updated) => setPayment(updated)}
+      />
 
       <Footer />
     </div>
